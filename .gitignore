@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+*.whl
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Environment / secrets
+.env
+
+# Upload & report temp files
+uploads/
+reports/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Datasets & test images (large files)
+dataset/
+*.jpeg
+*.jpg
+*.png
+*.pdf
+!templates/**/*.png
+!templates/**/*.jpg
+
+# Zip archives
+*.zip
+__MACOSX/
+Sheet/

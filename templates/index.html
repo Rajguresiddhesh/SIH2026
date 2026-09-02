@@ -1,0 +1,1546 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Legal Metrology Compliance Checker</title>
+  <meta name="description" content="AI-powered tool to analyse product packaging compliance with the Legal Metrology (Packaged Commodities) Rules, 2011 using multi-image inspection." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    /* ── Reset & tokens ──────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #050b18;
+      --surface:   #0d1526;
+      --glass:     rgba(255,255,255,0.04);
+      --border:    rgba(255,255,255,0.08);
+      --accent:    #3b82f6;
+      --accent2:   #6366f1;
+      --success:   #22c55e;
+      --warn:      #f59e0b;
+      --danger:    #ef4444;
+      --muted:     #94a3b8;
+      --text:      #e2e8f0;
+      --radius:    16px;
+      --shadow:    0 20px 60px rgba(0,0,0,.6);
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    /* ── Background mesh ─────────────────────────────────────────────── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 80% 60% at 20% 10%, rgba(59,130,246,.15) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 50% at 80% 80%, rgba(99,102,241,.12) 0%, transparent 60%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── Layout ──────────────────────────────────────────────────────── */
+    .page { position: relative; z-index: 1; max-width: 960px; margin: 0 auto; padding: 32px 20px 64px; }
+
+    /* ── Header ──────────────────────────────────────────────────────── */
+    .header { text-align: center; margin-bottom: 48px; }
+    .header .badge {
+      display: inline-block; background: linear-gradient(135deg,#3b82f6,#6366f1);
+      color: #fff; font-size: 11px; font-weight: 700; letter-spacing: .1em;
+      text-transform: uppercase; padding: 4px 14px; border-radius: 99px; margin-bottom: 16px;
+    }
+    .header h1 {
+      font-size: clamp(26px, 5vw, 42px); font-weight: 800; letter-spacing: -.02em;
+      background: linear-gradient(135deg,#e2e8f0 0%,#94a3b8 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      margin-bottom: 10px;
+    }
+    .header p { color: var(--muted); font-size: 15px; }
+
+    /* ── Card ────────────────────────────────────────────────────────── */
+    .card {
+      background: var(--glass);
+      backdrop-filter: blur(20px);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px;
+      box-shadow: var(--shadow);
+    }
+
+    /* ── Input mode tabs ─────────────────────────────────────────────── */
+    .tabs { display: flex; gap: 8px; margin-bottom: 28px; }
+    .tab-btn {
+      flex: 1; padding: 10px 16px; border-radius: 10px;
+      border: 1px solid var(--border); background: transparent;
+      color: var(--muted); font-size: 13px; font-weight: 600;
+      cursor: pointer; transition: all .2s;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+    }
+    .tab-btn:hover { border-color: var(--accent); color: var(--text); }
+    .tab-btn.active {
+      background: linear-gradient(135deg,rgba(59,130,246,.2),rgba(99,102,241,.2));
+      border-color: var(--accent); color: #fff;
+    }
+    .tab-btn svg { width:16px; height:16px; flex-shrink:0; }
+
+    /* ── Tab panels ──────────────────────────────────────────────────── */
+    .panel { display: none; }
+    .panel.active { display: block; }
+
+    /* ── 3-slot grid ─────────────────────────────────────────────────── */
+    .slots-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 14px;
+      margin-bottom: 4px;
+    }
+    @media (max-width: 640px) {
+      .slots-grid { grid-template-columns: 1fr; }
+    }
+
+    .slot-wrap { display: flex; flex-direction: column; gap: 0; }
+
+    .slot-header {
+      display: flex; align-items: center; gap: 7px;
+      margin-bottom: 8px;
+    }
+    .slot-label {
+      font-size: 12px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .07em; color: var(--text);
+    }
+    .slot-badge {
+      font-size: 10px; font-weight: 700; padding: 2px 8px;
+      border-radius: 99px; letter-spacing: .05em;
+    }
+    .badge-required { background: rgba(239,68,68,.2); color: #fca5a5; }
+    .badge-optional  { background: rgba(148,163,184,.12); color: var(--muted); }
+    .slot-hint { font-size: 10px; color: var(--muted); margin-bottom: 8px; line-height: 1.4; }
+
+    /* ── Drop zone ───────────────────────────────────────────────────── */
+    .drop-zone {
+      border: 2px dashed rgba(255,255,255,.12);
+      border-radius: 12px; padding: 24px 12px;
+      text-align: center; cursor: pointer;
+      transition: all .25s; position: relative;
+      background: rgba(255,255,255,.02);
+      min-height: 120px;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 6px;
+    }
+    .drop-zone:hover, .drop-zone.drag-over {
+      border-color: var(--accent);
+      background: rgba(59,130,246,.05);
+    }
+    .drop-zone.has-file {
+      border-color: var(--success);
+      background: rgba(34,197,94,.04);
+    }
+    .drop-zone.slot-active-cam {
+      border-color: var(--warn);
+      background: rgba(245,158,11,.05);
+    }
+    .drop-zone input[type="file"] {
+      position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
+    }
+    .drop-icon { font-size: 28px; }
+    .drop-zone p { color: var(--muted); font-size: 11px; line-height: 1.4; }
+    .drop-zone span { color: var(--accent); font-weight: 600; }
+
+    /* ── Slot preview ────────────────────────────────────────────────── */
+    .slot-preview {
+      margin-top: 8px; display: none; position: relative;
+    }
+    .slot-preview img {
+      width: 100%; height: 90px; object-fit: cover;
+      border-radius: 8px; border: 1px solid var(--border);
+    }
+    .slot-preview-clear {
+      position: absolute; top: 4px; right: 4px;
+      background: rgba(0,0,0,.7); border: none; color: #fff;
+      width: 22px; height: 22px; border-radius: 50%; cursor: pointer;
+      font-size: 12px; display: flex; align-items: center; justify-content: center;
+      transition: background .2s;
+    }
+    .slot-preview-clear:hover { background: var(--danger); }
+    .slot-filename {
+      font-size: 10px; color: var(--muted); margin-top: 4px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+
+    /* ── Camera panel ────────────────────────────────────────────────── */
+    .camera-slot-selector {
+      display: flex; gap: 8px; margin-bottom: 12px;
+    }
+    .cam-slot-btn {
+      flex: 1; padding: 8px 10px; border-radius: 8px;
+      border: 1px solid var(--border); background: transparent;
+      color: var(--muted); font-size: 11px; font-weight: 600;
+      cursor: pointer; transition: all .2s; text-align: center;
+    }
+    .cam-slot-btn:hover { border-color: var(--accent); color: var(--text); }
+    .cam-slot-btn.active {
+      background: rgba(245,158,11,.15);
+      border-color: var(--warn); color: #fde68a;
+    }
+
+    .camera-container {
+      position: relative; border-radius: 12px; overflow: hidden;
+      background: #000; min-height: 240px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    #videoFeed {
+      width: 100%; max-height: 400px; object-fit: cover;
+      display: block; border-radius: 12px;
+    }
+    #capturedCanvas { display: none; width: 100%; border-radius: 12px; }
+    .camera-placeholder {
+      position: absolute; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 10px;
+      color: var(--muted); text-align: center; padding: 24px;
+    }
+    .camera-placeholder svg { width: 48px; height: 48px; opacity: .4; }
+
+    .cam-controls { display: flex; gap: 10px; margin-top: 14px; }
+    .cam-controls .btn { flex: 1; }
+
+    /* ── Laser scanner animation ──────────────────────────────────────── */
+    .laser-scanner {
+      position: absolute; left: 8%; right: 8%; height: 2px;
+      background: #ef4444;
+      box-shadow: 0 0 8px #ef4444, 0 0 16px #ef4444;
+      animation: laserScan 2s ease-in-out infinite;
+      z-index: 5; pointer-events: none;
+    }
+    @keyframes laserScan {
+      0%   { top: 15%; opacity: 0.7; }
+      50%  { top: 85%; opacity: 1; }
+      100% { top: 15%; opacity: 0.7; }
+    }
+
+    /* ── Form fields ─────────────────────────────────────────────────── */
+    .field { margin-top: 20px; }
+    .field label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing:.07em; margin-bottom: 8px; }
+    .field input[type="number"] {
+      width: 100%; padding: 10px 14px; border-radius: 10px;
+      border: 1px solid var(--border); background: rgba(255,255,255,.04);
+      color: var(--text); font-size: 14px; font-family: inherit;
+      outline: none; transition: border-color .2s;
+    }
+    .field input[type="number"]:focus { border-color: var(--accent); }
+    .field .hint { color: var(--muted); font-size: 11px; margin-top: 5px; }
+
+    /* ── Buttons ─────────────────────────────────────────────────────── */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      gap: 8px; padding: 11px 22px; border-radius: 10px; font-size: 14px;
+      font-weight: 600; font-family: inherit; cursor: pointer;
+      border: none; transition: all .2s; white-space: nowrap;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: #fff; box-shadow: 0 4px 20px rgba(59,130,246,.35);
+    }
+    .btn-primary:hover { filter: brightness(1.1); transform: translateY(-1px); box-shadow: 0 6px 28px rgba(59,130,246,.45); }
+    .btn-primary:active { transform: translateY(0); }
+    .btn-primary:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+    .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text); }
+    .btn-outline:hover { border-color: var(--accent); color: var(--accent); }
+    .btn-danger { background: rgba(239,68,68,.15); border: 1px solid rgba(239,68,68,.3); color: #fca5a5; }
+    .btn-danger:hover { background: rgba(239,68,68,.25); }
+    .btn-success { background: rgba(34,197,94,.15); border: 1px solid rgba(34,197,94,.3); color: #86efac; }
+    .btn-success:hover { background: rgba(34,197,94,.25); }
+
+    .analyze-row { margin-top: 24px; display: flex; gap: 12px; }
+    #analyzeBtn { flex: 1; padding: 14px; font-size: 15px; }
+
+    /* ── Coverage indicator ──────────────────────────────────────────── */
+    .coverage-bar {
+      margin-top: 16px; padding: 10px 16px;
+      border-radius: 10px; border: 1px solid var(--border);
+      background: rgba(255,255,255,.02);
+      display: flex; align-items: center; gap: 12px;
+    }
+    .coverage-dots { display: flex; gap: 6px; }
+    .cov-dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: rgba(255,255,255,.1); transition: background .3s;
+    }
+    .cov-dot.filled { background: var(--success); }
+    .cov-dot.optional.filled { background: var(--warn); }
+    .coverage-text { font-size: 12px; color: var(--muted); }
+
+    /* ── Loader ──────────────────────────────────────────────────────── */
+    .loader-wrap {
+      display: none; margin-top: 40px; text-align: center;
+    }
+    .loader-wrap.active { display: block; }
+    .spinner {
+      width: 48px; height: 48px; border: 4px solid rgba(255,255,255,.1);
+      border-top-color: var(--accent); border-radius: 50%;
+      animation: spin .8s linear infinite; margin: 0 auto 16px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loader-wrap p { color: var(--muted); font-size: 13px; }
+
+    /* ── Results ─────────────────────────────────────────────────────── */
+    #results { display: none; margin-top: 40px; }
+    #results.visible { display: block; }
+
+    .results-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; flex-wrap: wrap; gap: 12px; }
+    .results-header h2 { font-size: 20px; font-weight: 700; }
+
+    /* Score circle */
+    .score-row { display: flex; gap: 20px; margin-bottom: 28px; flex-wrap: wrap; }
+    .score-card {
+      flex: 1; min-width: 160px;
+      background: var(--glass); border: 1px solid var(--border);
+      border-radius: 14px; padding: 20px; text-align: center;
+    }
+    .score-card .label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: 10px; }
+    .score-big {
+      font-size: 40px; font-weight: 800; line-height: 1;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .score-big.danger { background: linear-gradient(135deg,#ef4444,#f97316); -webkit-background-clip: text; }
+    .score-big.warn   { background: linear-gradient(135deg,#f59e0b,#eab308); -webkit-background-clip: text; }
+    .score-big.good   { background: linear-gradient(135deg,#22c55e,#16a34a); -webkit-background-clip: text; }
+    .star-label { font-size: 13px; color: var(--muted); margin-top: 6px; }
+    .stars { font-size: 22px; letter-spacing: 2px; margin-bottom: 4px; }
+
+    /* Rule table */
+    .section-title {
+      font-size: 13px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .08em; color: var(--muted); margin-bottom: 14px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .section-title .count {
+      background: rgba(255,255,255,.08); color: var(--text);
+      font-size: 11px; padding: 2px 8px; border-radius: 99px;
+    }
+
+    .rule-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 28px; }
+    .rule-item {
+      display: flex; align-items: flex-start; gap: 12px; padding: 12px 16px;
+      border-radius: 10px; border: 1px solid transparent;
+      background: rgba(255,255,255,.03);
+      transition: background .15s;
+    }
+    .rule-item:hover { background: rgba(255,255,255,.05); }
+    .rule-item.PASS   { border-color: rgba(34,197,94,.2); }
+    .rule-item.FAIL   { border-color: rgba(239,68,68,.2); background: rgba(239,68,68,.04); }
+    .rule-item.WARNING{ border-color: rgba(245,158,11,.2); }
+    .rule-item.N_A    { border-color: rgba(148,163,184,.1); }
+    .rule-item.INCONCLUSIVE { border-color: rgba(148,163,184,.1); }
+
+    .rule-pill {
+      flex-shrink: 0; font-size: 10px; font-weight: 700; padding: 3px 8px;
+      border-radius: 6px; text-transform: uppercase; letter-spacing: .06em; margin-top: 2px;
+    }
+    .pill-PASS        { background: rgba(34,197,94,.2);  color: #86efac; }
+    .pill-FAIL        { background: rgba(239,68,68,.2);  color: #fca5a5; }
+    .pill-WARNING     { background: rgba(245,158,11,.2); color: #fde68a; }
+    .pill-N_A         { background: rgba(148,163,184,.15); color: var(--muted); }
+    .pill-INCONCLUSIVE{ background: rgba(148,163,184,.15); color: var(--muted); }
+
+    .sev-pill {
+      flex-shrink: 0; font-size: 9px; font-weight: 700; padding: 2px 7px;
+      border-radius: 5px; text-transform: uppercase; letter-spacing: .05em; margin-top: 4px;
+    }
+    .sev-CRITICAL { background: rgba(239,68,68,.3); color: #fca5a5; }
+    .sev-MAJOR    { background: rgba(245,158,11,.25); color: #fde68a; }
+    .sev-MINOR    { background: rgba(99,102,241,.25); color: #c7d2fe; }
+    .sev-INFO     { background: rgba(148,163,184,.15); color: var(--muted); }
+
+    .rule-content { flex: 1; min-width: 0; }
+    .rule-name { font-size: 13px; font-weight: 600; }
+    .rule-id   { font-size: 10px; color: var(--muted); }
+    .rule-detail { font-size: 12px; color: var(--muted); margin-top: 3px; }
+
+    /* Recs */
+    .rec-list { list-style: none; display: flex; flex-direction: column; gap: 10px; }
+    .rec-list li {
+      padding: 12px 16px; border-radius: 10px;
+      background: rgba(245,158,11,.06); border: 1px solid rgba(245,158,11,.2);
+      font-size: 13px; line-height: 1.5;
+      display: flex; align-items: flex-start; gap: 10px;
+    }
+    .rec-list li::before { content: '→'; color: var(--warn); flex-shrink: 0; margin-top: 1px; }
+
+    /* Error banner */
+    .error-banner {
+      display: none; margin-top: 20px;
+      padding: 14px 18px; border-radius: 10px;
+      background: rgba(239,68,68,.1); border: 1px solid rgba(239,68,68,.3);
+      color: #fca5a5; font-size: 13px;
+    }
+    .error-banner.active { display: block; }
+    .error-banner pre { margin-top: 8px; font-size: 11px; overflow-x: auto; opacity: .7; }
+
+    /* Collapse for N/A rules */
+    .collapsible { cursor: pointer; user-select: none; }
+    .collapsible .chevron { transition: transform .2s; display: inline-block; margin-left: 6px; }
+    .collapsible.open .chevron { transform: rotate(180deg); }
+    .collapse-body { display: none; }
+    .collapse-body.open { display: flex; flex-direction: column; gap: 8px; }
+
+    /* Images used banner */
+    .images-used-bar {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 16px; border-radius: 10px;
+      border: 1px solid rgba(34,197,94,.2);
+      background: rgba(34,197,94,.04);
+      margin-bottom: 20px; font-size: 12px; flex-wrap: wrap;
+    }
+    .img-tag {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 3px 10px; border-radius: 99px; font-size: 11px; font-weight: 600;
+    }
+    .img-tag.used { background: rgba(34,197,94,.15); color: #86efac; }
+    .img-tag.not-used { background: rgba(148,163,184,.1); color: var(--muted); }
+
+    @media (max-width: 600px) {
+      .score-row { flex-direction: column; }
+      .analyze-row { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ── Header ─────────────────────────────────────────────────────── -->
+  <header class="header">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <div class="badge">Legal Metrology AI</div>
+      <button onclick="openApiKeyModal()" id="apiKeyBtn" style="background:rgba(255,255,255,.06);border:1px solid var(--border);color:var(--text);border-radius:99px;padding:6px 14px;font-size:12px;font-weight:600;display:flex;align-items:center;gap:6px;cursor:pointer;transition:all .2s;">
+        <span>🔑</span> <span id="apiKeyStatusText">Gemini API Key</span>
+      </button>
+    </div>
+    <h1>Legal Metrology Compliance Checker</h1>
+    <p>Automated Legal Metrology & GS1 compliance inspection powered by Gemini Vision & Barcode Intelligence</p>
+  </header>
+
+  <!-- ── Input card ────────────────────────────────────────────────── -->
+  <div class="card" id="inputCard">
+
+    <!-- Mode tabs -->
+    <div class="tabs" role="tablist">
+      <button class="tab-btn active" id="tabUpload" role="tab" onclick="switchTab('upload')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+        Upload Images
+      </button>
+      <button class="tab-btn" id="tabCamera" role="tab" onclick="switchTab('camera')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M23 7 16 12l7 5V7z"/>
+          <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+        </svg>
+        Camera Capture
+      </button>
+      <button class="tab-btn" id="tabBarcode" role="tab" onclick="switchTab('barcode')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M3 5v14M8 5v14M12 5v14M17 5v14M21 5v14M5 5v14M14 5v14"/>
+        </svg>
+        Scan Barcode
+      </button>
+    </div>
+
+    <!-- ── Upload panel ── -->
+    <div class="panel active" id="panelUpload">
+
+      <!-- Attached Barcode Indicator -->
+      <div class="attached-barcode-banner" id="attachedBarcodeBanner" style="display:none;margin-bottom:14px;padding:10px 14px;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);border-radius:10px;align-items:center;justify-content:space-between;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span style="font-size:20px;">🏷️</span>
+          <div>
+            <div style="font-size:12px;font-weight:700;color:#4ade80;">Active Scanned Barcode Attached</div>
+            <div id="attachedBarcodeText" style="font-size:11px;color:var(--text);font-family:monospace;"></div>
+          </div>
+        </div>
+        <button onclick="removeAttachedBarcode()" style="background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:14px;padding:4px;" title="Remove barcode">✕</button>
+      </div>
+
+      <div class="slots-grid">
+
+        <!-- SLOT 1: Front -->
+        <div class="slot-wrap">
+          <div class="slot-header">
+            <span class="slot-label">Front Label</span>
+            <span class="slot-badge badge-required">Required</span>
+          </div>
+          <div class="slot-hint">Commodity name, brand, MRP, veg/non-veg symbol</div>
+          <div class="drop-zone" id="dropFront" ondragover="onDragOver(event,'front')" ondragleave="onDragLeave(event,'front')" ondrop="onDrop(event,'front')">
+            <input type="file" id="fileInputFront" accept="image/*" onchange="onFileChange(event,'front')" />
+            <div class="drop-icon">📦</div>
+            <p><span>Click to browse</span> or drag & drop</p>
+            <p style="font-size:10px;">JPEG, PNG, WEBP — up to 20 MB</p>
+          </div>
+          <div class="slot-preview" id="previewWrapFront">
+            <img id="previewImgFront" src="" alt="Front preview" />
+            <button class="slot-preview-clear" onclick="clearSlot('front')" title="Remove">✕</button>
+            <div class="slot-filename" id="filenameFront"></div>
+          </div>
+        </div>
+
+        <!-- SLOT 2: Back/Side -->
+        <div class="slot-wrap">
+          <div class="slot-header">
+            <span class="slot-label">Back / Side</span>
+            <span class="slot-badge badge-required">Required</span>
+          </div>
+          <div class="slot-hint">Manufacturer, net qty, FSSAI licence, mfg & exp dates, consumer care</div>
+          <div class="drop-zone" id="dropBack" ondragover="onDragOver(event,'back')" ondragleave="onDragLeave(event,'back')" ondrop="onDrop(event,'back')">
+            <input type="file" id="fileInputBack" accept="image/*" onchange="onFileChange(event,'back')" />
+            <div class="drop-icon">🔄</div>
+            <p><span>Click to browse</span> or drag & drop</p>
+            <p style="font-size:10px;">JPEG, PNG, WEBP — up to 20 MB</p>
+          </div>
+          <div class="slot-preview" id="previewWrapBack">
+            <img id="previewImgBack" src="" alt="Back preview" />
+            <button class="slot-preview-clear" onclick="clearSlot('back')" title="Remove">✕</button>
+            <div class="slot-filename" id="filenameBack"></div>
+          </div>
+        </div>
+
+        <!-- SLOT 3: Ruler (optional) -->
+        <div class="slot-wrap">
+          <div class="slot-header">
+            <span class="slot-label">Ruler Photo</span>
+            <span class="slot-badge badge-optional">Optional</span>
+          </div>
+          <div class="slot-hint">Place a mm ruler next to the label. Enables precise font-size compliance checking (Rule 7).</div>
+          <div class="drop-zone" id="dropRuler" ondragover="onDragOver(event,'ruler')" ondragleave="onDragLeave(event,'ruler')" ondrop="onDrop(event,'ruler')">
+            <input type="file" id="fileInputRuler" accept="image/*" onchange="onFileChange(event,'ruler')" />
+            <div class="drop-icon">📏</div>
+            <p><span>Click to browse</span> or drag & drop</p>
+            <p style="font-size:10px;">Optional — JPEG, PNG, WEBP</p>
+          </div>
+          <div class="slot-preview" id="previewWrapRuler">
+            <img id="previewImgRuler" src="" alt="Ruler preview" />
+            <button class="slot-preview-clear" onclick="clearSlot('ruler')" title="Remove">✕</button>
+            <div class="slot-filename" id="filenameRuler"></div>
+          </div>
+        </div>
+
+      </div><!-- /.slots-grid -->
+
+      <!-- Coverage bar -->
+      <div class="coverage-bar" id="coverageBar">
+        <div class="coverage-dots">
+          <div class="cov-dot" id="covFront" title="Front label"></div>
+          <div class="cov-dot" id="covBack"  title="Back/side label"></div>
+          <div class="cov-dot optional" id="covRuler" title="Ruler photo"></div>
+        </div>
+        <div class="coverage-text" id="coverageText">Add front &amp; back label photos to begin</div>
+      </div>
+    </div><!-- /#panelUpload -->
+
+    <!-- ── Camera panel ── -->
+    <div class="panel" id="panelCamera">
+
+      <!-- Active slot selector -->
+      <div class="camera-slot-selector">
+        <button class="cam-slot-btn active" id="camBtnFront" onclick="setCamSlot('front')">📦 Front</button>
+        <button class="cam-slot-btn"        id="camBtnBack"  onclick="setCamSlot('back')">🔄 Back/Side</button>
+        <button class="cam-slot-btn"        id="camBtnRuler" onclick="setCamSlot('ruler')">📏 Ruler</button>
+      </div>
+
+      <div class="camera-container" id="cameraContainer">
+        <div class="camera-placeholder" id="cameraPlaceholder">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M23 7 16 12l7 5V7z"/>
+            <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+          </svg>
+          <p>Camera feed will appear here</p>
+          <p style="font-size:11px;">Select a slot above, then click "Start Camera"</p>
+        </div>
+        <video id="videoFeed" autoplay playsinline style="display:none;"></video>
+        <canvas id="capturedCanvas"></canvas>
+      </div>
+      <div class="cam-controls">
+        <button class="btn btn-outline" id="startCamBtn" onclick="startCamera()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/>
+          </svg>
+          Start Camera
+        </button>
+        <button class="btn btn-primary" id="captureBtn" onclick="capturePhoto()" disabled>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/>
+          </svg>
+          Capture
+        </button>
+        <button class="btn btn-danger" id="retakeBtn" onclick="retakePhoto()" style="display:none;">Retake</button>
+        <button class="btn btn-outline" id="stopCamBtn" onclick="stopCamera()" style="display:none;">Stop</button>
+      </div>
+
+      <!-- Thumbnails row for captured camera images -->
+      <div class="slots-grid" style="margin-top:14px;">
+        <div class="slot-wrap">
+          <div class="slot-header"><span class="slot-label">Front</span><span class="slot-badge badge-required">Required</span></div>
+          <div class="slot-preview" id="camPreviewWrapFront" style="display:none;margin-top:0;">
+            <img id="camPreviewImgFront" src="" alt="Front captured" />
+            <button class="slot-preview-clear" onclick="clearCamSlot('front')" title="Remove">✕</button>
+          </div>
+          <div style="font-size:10px;color:var(--muted);" id="camStatusFront">Not captured</div>
+        </div>
+        <div class="slot-wrap">
+          <div class="slot-header"><span class="slot-label">Back / Side</span><span class="slot-badge badge-required">Required</span></div>
+          <div class="slot-preview" id="camPreviewWrapBack" style="display:none;margin-top:0;">
+            <img id="camPreviewImgBack" src="" alt="Back captured" />
+            <button class="slot-preview-clear" onclick="clearCamSlot('back')" title="Remove">✕</button>
+          </div>
+          <div style="font-size:10px;color:var(--muted);" id="camStatusBack">Not captured</div>
+        </div>
+        <div class="slot-wrap">
+          <div class="slot-header"><span class="slot-label">Ruler</span><span class="slot-badge badge-optional">Optional</span></div>
+          <div class="slot-preview" id="camPreviewWrapRuler" style="display:none;margin-top:0;">
+            <img id="camPreviewImgRuler" src="" alt="Ruler captured" />
+            <button class="slot-preview-clear" onclick="clearCamSlot('ruler')" title="Remove">✕</button>
+          </div>
+          <div style="font-size:10px;color:var(--muted);" id="camStatusRuler">Not captured (optional)</div>
+        </div>
+      </div>
+
+    </div><!-- /#panelCamera -->
+
+    <!-- ── Barcode Scanner panel ── -->
+    <div class="panel" id="panelBarcode">
+      <div class="barcode-scanner-box">
+        <div class="camera-container" id="barcodeCamContainer" style="min-height:240px;position:relative;">
+          <div class="camera-placeholder" id="barcodePlaceholder">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;opacity:0.6;">
+              <path d="M3 5v14M8 5v14M12 5v14M17 5v14M21 5v14M5 5v14M14 5v14"/>
+            </svg>
+            <p style="font-weight:600;color:var(--text);margin-top:8px;">Point camera at product barcode or QR code</p>
+            <p style="font-size:11px;color:var(--muted);">Supports EAN-13, UPC, Code 128, QR Code</p>
+          </div>
+          <video id="barcodeVideo" autoplay playsinline style="display:none;width:100%;max-height:360px;object-fit:cover;border-radius:12px;"></video>
+          <div class="laser-scanner" id="barcodeLaserLine" style="display:none;"></div>
+          <canvas id="barcodeCanvas" style="display:none;"></canvas>
+        </div>
+
+        <div class="cam-controls">
+          <button class="btn btn-outline" id="startBarcodeCamBtn" onclick="startBarcodeCamera()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/>
+            </svg>
+            Start Barcode Camera
+          </button>
+          <button class="btn btn-outline" id="stopBarcodeCamBtn" onclick="stopBarcodeCamera()" style="display:none;">Stop Camera</button>
+        </div>
+
+        <!-- Or drop a barcode image -->
+        <div style="margin-top:16px;text-align:center;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;">
+          — OR UPLOAD BARCODE PHOTO —
+        </div>
+        <div class="drop-zone" id="dropBarcode" style="margin-top:8px;min-height:85px;" ondragover="onDragOver(event,'barcode')" ondragleave="onDragLeave(event,'barcode')" ondrop="onDropBarcode(event)">
+          <input type="file" id="fileInputBarcode" accept="image/*" onchange="onBarcodeFileChange(event)" />
+          <div class="drop-icon">🏷️</div>
+          <p><span>Upload barcode or QR code photo</span></p>
+          <p style="font-size:10px;">JPEG, PNG, WEBP</p>
+        </div>
+
+        <!-- Or enter manually -->
+        <div style="margin-top:16px;display:flex;gap:8px;">
+          <input type="text" id="manualBarcodeInput" placeholder="Or enter barcode number (e.g. 8901030928239)" style="flex:1;padding:10px 14px;border-radius:10px;border:1px solid var(--border);background:rgba(255,255,255,.04);color:var(--text);font-size:13px;" />
+          <button class="btn btn-outline" onclick="applyManualBarcode()" style="white-space:nowrap;">Verify Code</button>
+        </div>
+
+        <!-- Scanned Barcode Result Display -->
+        <div id="barcodeResultCard" style="display:none;margin-top:18px;background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.3);border-radius:12px;padding:16px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--accent);">Scanned Barcode Verified</span>
+            <span id="barcodeValidityBadge" style="font-size:11px;padding:3px 8px;border-radius:99px;background:rgba(34,197,94,.15);color:#4ade80;font-weight:600;">Valid ✅</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;margin:10px 0;">
+            <div style="font-size:32px;">🏷️</div>
+            <div>
+              <div id="barcodeDisplayValue" style="font-size:18px;font-weight:700;font-family:monospace;letter-spacing:1px;color:#fff;"></div>
+              <div id="barcodeDisplayMeta" style="font-size:12px;color:var(--muted);margin-top:2px;"></div>
+            </div>
+          </div>
+          <div style="display:flex;gap:10px;margin-top:14px;">
+            <button class="btn btn-primary" style="flex:1;" onclick="useBarcodeAndAnalyse()">
+              ➜ Use This Barcode & Analyse Packaging
+            </button>
+            <button class="btn btn-outline" onclick="resetBarcodeScanner()">Rescan</button>
+          </div>
+        </div>
+
+      </div>
+    </div><!-- /#panelBarcode -->
+
+    <!-- Shared options -->
+    <div class="field">
+      <label for="heightInput">Package Height (mm) <span style="font-weight:400;text-transform:none;letter-spacing:0"> — optional</span></label>
+      <input type="number" id="heightInput" placeholder="e.g. 200" min="10" max="2000" step="1" />
+      <p class="hint">Real-world height of the package. Used for font-size calibration when no ruler or barcode is available.</p>
+    </div>
+
+    <div class="analyze-row">
+      <button class="btn btn-primary" id="analyzeBtn" onclick="runAnalysis()" disabled>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+        Analyse Packaging
+      </button>
+    </div>
+
+    <!-- Error -->
+    <div class="error-banner" id="errorBanner"></div>
+  </div>
+
+  <!-- ── Loader ─────────────────────────────────────────────────────── -->
+  <div class="loader-wrap" id="loaderWrap">
+    <div class="spinner"></div>
+    <p id="loaderMsg">Running compliance analysis…</p>
+  </div>
+
+  <!-- ── Results ────────────────────────────────────────────────────── -->
+  <div id="results">
+
+    <div class="results-header">
+      <h2>Compliance Report</h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <span id="scanIdBadge" style="font-size:11px;color:var(--muted);padding:6px 12px;border:1px solid var(--border);border-radius:99px;"></span>
+        <a id="downloadBtn" href="#" class="btn btn-success" style="font-size:13px;padding:8px 18px;">
+          ⬇ Download PDF
+        </a>
+      </div>
+    </div>
+
+    <!-- Engine Used Badge -->
+    <div id="engineUsedBadge" style="display:none;margin-bottom:14px;">
+      <span style="display:inline-flex;align-items:center;gap:6px;padding:5px 14px;border-radius:99px;font-size:12px;font-weight:600;background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.3);color:#93c5fd;">
+        <span id="engineUsedIcon">✨</span>
+        <span id="engineUsedText">Gemini Multimodal Vision Analysis</span>
+      </span>
+    </div>
+
+    <!-- Images used indicator -->
+    <div class="images-used-bar" id="imagesUsedBar" style="display:none;">
+      <span style="font-size:11px;color:var(--muted);font-weight:600;">Images analysed:</span>
+      <span class="img-tag" id="iu-front">📦 Front</span>
+      <span class="img-tag" id="iu-back">🔄 Back/Side</span>
+      <span class="img-tag" id="iu-ruler">📏 Ruler</span>
+      <span class="img-tag" id="iu-barcode">🏷️ Barcode</span>
+    </div>
+
+    <!-- Barcode & GS1 Verification Card -->
+    <div id="barcodeReportCard" style="display:none;margin-top:16px;padding:16px 20px;border-radius:12px;background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.3);">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span style="font-size:24px;">🏷️</span>
+          <div>
+            <div style="font-size:11px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.08em;">GS1 Barcode & Product Identification</div>
+            <div id="resBarcodeValue" style="font-size:17px;font-weight:700;font-family:monospace;letter-spacing:1px;color:#fff;margin-top:2px;"></div>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <span id="resBarcodeTypeBadge" style="font-size:11px;padding:4px 10px;border-radius:99px;background:rgba(255,255,255,.08);color:var(--text);font-weight:600;"></span>
+          <span id="resBarcodeCountryBadge" style="font-size:11px;padding:4px 10px;border-radius:99px;background:rgba(59,130,246,.2);color:#93c5fd;font-weight:600;"></span>
+          <span id="resBarcodeValidBadge" style="font-size:11px;padding:4px 10px;border-radius:99px;background:rgba(34,197,94,.15);color:#4ade80;font-weight:600;"></span>
+        </div>
+      </div>
+      <div id="resBarcodeNote" style="font-size:11px;color:var(--muted);margin-top:8px;"></div>
+    </div>
+
+    <!-- Score cards -->
+    <div class="score-row">
+      <div class="score-card">
+        <div class="label">Overall Score</div>
+        <div class="score-big" id="scoreVal">—</div>
+        <div class="star-label" id="starLabel">—</div>
+      </div>
+      <div class="score-card">
+        <div class="label">Star Rating</div>
+        <div class="stars" id="starsDisplay">—</div>
+        <div class="star-label" id="starsLabel">out of 5</div>
+      </div>
+      <div class="score-card">
+        <div class="label">Rules</div>
+        <div style="margin-top:8px;display:flex;justify-content:center;gap:16px;">
+          <div style="text-align:center;">
+            <div style="font-size:28px;font-weight:800;color:var(--success);" id="passedCount">—</div>
+            <div style="font-size:11px;color:var(--muted);">Passed</div>
+          </div>
+          <div style="text-align:center;">
+            <div style="font-size:28px;font-weight:800;color:var(--danger);" id="failedCount">—</div>
+            <div style="font-size:11px;color:var(--muted);">Failed</div>
+          </div>
+        </div>
+      </div>
+      <div class="score-card">
+        <div class="label">Sub-scores</div>
+        <div style="margin-top:6px;">
+          <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
+            <span style="font-size:12px;color:var(--muted);">EBM Model</span>
+            <span style="font-size:12px;font-weight:600;" id="ebmScore">—</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;">
+            <span style="font-size:12px;color:var(--muted);">Rule Engine</span>
+            <span style="font-size:12px;font-weight:600;" id="ruleScore">—</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Failed rules -->
+    <div id="failedSection" style="display:none;margin-bottom:28px;">
+      <div class="section-title">
+        <span>❌ Failures</span><span class="count" id="failedBadge"></span>
+      </div>
+      <div class="rule-list" id="failedList"></div>
+    </div>
+
+    <!-- Passed rules -->
+    <div id="passedSection" style="display:none;margin-bottom:28px;">
+      <div class="section-title">
+        <span>✅ Passed</span><span class="count" id="passedBadge"></span>
+      </div>
+      <div class="rule-list" id="passedList"></div>
+    </div>
+
+    <!-- N/A & Inconclusive (collapsed) -->
+    <div id="naSection" style="display:none;margin-bottom:28px;">
+      <div class="section-title collapsible" id="naToggle" onclick="toggleSection('naBody','naToggle')">
+        <span>⬜ Not Applicable / Inconclusive</span><span class="count" id="naBadge"></span>
+        <span class="chevron">▾</span>
+      </div>
+      <div class="collapse-body" id="naBody"></div>
+    </div>
+
+    <!-- Recommendations -->
+    <div id="recSection" style="display:none;">
+      <div class="section-title">
+        <span>💡 Recommendations</span><span class="count" id="recBadge"></span>
+      </div>
+      <ul class="rec-list" id="recList"></ul>
+    </div>
+
+  </div><!-- /#results -->
+
+</div><!-- /.page -->
+
+<!-- ── API Key Modal ── -->
+<div id="apiKeyModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.78);z-index:9999;align-items:center;justify-content:center;backdrop-filter:blur(5px);">
+  <div style="background:#0f172a;border:1px solid rgba(255,255,255,.15);border-radius:18px;padding:26px;max-width:480px;width:90%;box-shadow:0 25px 50px -12px rgba(0,0,0,.7);">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <h3 style="margin:0;font-size:18px;font-weight:700;color:#fff;display:flex;align-items:center;gap:8px;">
+        <span>🔑</span> Google Gemini LLM Setup
+      </h3>
+      <button onclick="closeApiKeyModal()" style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer;padding:4px;">✕</button>
+    </div>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:16px;line-height:1.5;">
+      Enables <b>instant Barcode product verification</b> and <b>Multimodal Vision label analysis</b> on packaging photos without brittle OCR.
+    </p>
+    <div style="margin-bottom:14px;">
+      <label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;color:var(--muted);margin-bottom:6px;letter-spacing:.05em;">Gemini API Key</label>
+      <input type="password" id="geminiKeyInput" placeholder="AIzaSy..." style="width:100%;padding:11px 14px;border-radius:10px;border:1px solid var(--border);background:rgba(255,255,255,.05);color:#fff;font-family:monospace;font-size:13px;box-sizing:border-box;" />
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+      <a href="https://aistudio.google.com/app/apikey" target="_blank" style="font-size:12px;color:var(--accent);text-decoration:none;font-weight:600;">➜ Get a free key from Google AI Studio</a>
+      <span id="keySaveStatus" style="font-size:12px;font-weight:600;color:#4ade80;"></span>
+    </div>
+    <div style="display:flex;gap:10px;">
+      <button class="btn btn-primary" style="flex:1;" onclick="saveApiKey()">Save Key</button>
+      <button class="btn btn-outline" onclick="closeApiKeyModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ─── State ─────────────────────────────────────────────────────────────── */
+let mode = 'upload';
+
+// Upload slots: File objects
+const uploadFiles = { front: null, back: null, ruler: null };
+
+// Camera slots: data-URLs
+const camDataUrls = { front: null, back: null, ruler: null };
+let activeCamSlot = 'front';
+let stream = null;
+
+// Barcode scanner state
+let activeBarcode = null;
+let barcodeStream = null;
+let barcodeScanInterval = null;
+
+/* ─── API Key Management ────────────────────────────────────────────────── */
+let geminiApiKey = localStorage.getItem('gemini_api_key') || '';
+
+async function checkApiKeyStatus() {
+  try {
+    const res = await fetch('/api/settings/api-key');
+    const data = await res.json();
+    const btn = document.getElementById('apiKeyStatusText');
+    if (data.has_key || geminiApiKey) {
+      btn.textContent = 'Gemini Active 🟢';
+      btn.style.color = '#4ade80';
+    } else {
+      btn.textContent = 'Gemini API Key ⚪';
+      btn.style.color = 'var(--text)';
+    }
+  } catch (e) {
+    if (geminiApiKey) {
+      document.getElementById('apiKeyStatusText').textContent = 'Gemini Active 🟢';
+    }
+  }
+}
+
+function openApiKeyModal() {
+  document.getElementById('geminiKeyInput').value = geminiApiKey;
+  document.getElementById('keySaveStatus').textContent = '';
+  document.getElementById('apiKeyModal').style.display = 'flex';
+}
+
+function closeApiKeyModal() {
+  document.getElementById('apiKeyModal').style.display = 'none';
+}
+
+async function saveApiKey() {
+  const val = document.getElementById('geminiKeyInput').value.trim();
+  if (!val) {
+    alert('Please enter a valid Gemini API key.');
+    return;
+  }
+  geminiApiKey = val;
+  localStorage.setItem('gemini_api_key', val);
+
+  try {
+    await fetch('/api/settings/api-key', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api_key: val }),
+    });
+  } catch (e) {}
+
+  document.getElementById('keySaveStatus').textContent = 'Saved! ✅';
+  checkApiKeyStatus();
+  setTimeout(closeApiKeyModal, 600);
+}
+
+document.addEventListener('DOMContentLoaded', checkApiKeyStatus);
+
+/* ─── Tab switching ─────────────────────────────────────────────────────── */
+function switchTab(tab) {
+  mode = tab;
+  document.getElementById('tabUpload').classList.toggle('active', tab === 'upload');
+  document.getElementById('tabCamera').classList.toggle('active', tab === 'camera');
+  document.getElementById('tabBarcode').classList.toggle('active', tab === 'barcode');
+  document.getElementById('panelUpload').classList.toggle('active', tab === 'upload');
+  document.getElementById('panelCamera').classList.toggle('active', tab === 'camera');
+  document.getElementById('panelBarcode').classList.toggle('active', tab === 'barcode');
+  if (tab !== 'barcode' && barcodeStream) {
+    stopBarcodeCamera();
+  }
+  if (tab !== 'camera' && stream) {
+    stopCamera();
+  }
+  updateAnalyzeBtn();
+  hideError();
+}
+
+/* ─── Upload handling ───────────────────────────────────────────────────── */
+function onDragOver(e, slot)  { e.preventDefault(); document.getElementById('drop'+cap(slot)).classList.add('drag-over'); }
+function onDragLeave(e, slot) { document.getElementById('drop'+cap(slot)).classList.remove('drag-over'); }
+function onDrop(e, slot) {
+  e.preventDefault();
+  document.getElementById('drop'+cap(slot)).classList.remove('drag-over');
+  if (e.dataTransfer.files[0]) applyFile(slot, e.dataTransfer.files[0]);
+}
+function onFileChange(e, slot) {
+  if (e.target.files[0]) applyFile(slot, e.target.files[0]);
+}
+
+function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+
+function applyFile(slot, file) {
+  uploadFiles[slot] = file;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    document.getElementById('previewImg' + cap(slot)).src = ev.target.result;
+    document.getElementById('previewWrap' + cap(slot)).style.display = 'block';
+    document.getElementById('drop' + cap(slot)).classList.add('has-file');
+    const fn = document.getElementById('filename' + cap(slot));
+    if (fn) fn.textContent = file.name;
+  };
+  reader.readAsDataURL(file);
+  updateAnalyzeBtn();
+  updateCoverage();
+}
+
+function clearSlot(slot) {
+  uploadFiles[slot] = null;
+  document.getElementById('fileInput' + cap(slot)).value = '';
+  document.getElementById('previewWrap' + cap(slot)).style.display = 'none';
+  document.getElementById('drop' + cap(slot)).classList.remove('has-file');
+  updateAnalyzeBtn();
+  updateCoverage();
+}
+
+/* ─── Coverage bar (upload panel) ───────────────────────────────────────── */
+function updateCoverage() {
+  const hasFront = !!uploadFiles.front;
+  const hasBack  = !!uploadFiles.back;
+  const hasRuler = !!uploadFiles.ruler;
+
+  document.getElementById('covFront').classList.toggle('filled', hasFront);
+  document.getElementById('covBack').classList.toggle('filled', hasBack);
+  document.getElementById('covRuler').classList.toggle('filled', hasRuler);
+
+  let msg = '';
+  if (!hasFront && !hasBack) {
+    msg = 'Add packaging label photo(s) to begin';
+  } else if (hasFront && !hasBack) {
+    msg = '💡 Front label added. Tip: Add Back/Side label for statutory checks (MRP, Dates, Mfr), or click Analyse.';
+  } else if (!hasFront && hasBack) {
+    msg = 'Back/Side label added — ready to Analyse (or add Front label).';
+  } else if (hasFront && hasBack && !hasRuler) {
+    msg = '✅ Both Front & Back labels ready — full statutory compliance check enabled!';
+  } else {
+    msg = '✅ All images ready — press Analyse';
+  }
+  document.getElementById('coverageText').textContent = msg;
+}
+
+/* ─── Camera slot selector ──────────────────────────────────────────────── */
+function setCamSlot(slot) {
+  activeCamSlot = slot;
+  ['front','back','ruler'].forEach(s => {
+    document.getElementById('camBtn' + cap(s)).classList.toggle('active', s === slot);
+  });
+  // If camera is live, show the active-slot overlay on video
+  const liveZone = document.getElementById('videoFeed');
+  if (liveZone.style.display !== 'none') {
+    // Flash the label
+    document.title = 'Capture: ' + cap(slot) + ' label';
+  }
+}
+
+/* ─── Camera handling ───────────────────────────────────────────────────── */
+async function startCamera() {
+  hideError();
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280 } } });
+    const vid = document.getElementById('videoFeed');
+    vid.srcObject = stream;
+    vid.style.display = 'block';
+    document.getElementById('capturedCanvas').style.display = 'none';
+    document.getElementById('cameraPlaceholder').style.display = 'none';
+    document.getElementById('startCamBtn').style.display = 'none';
+    document.getElementById('captureBtn').disabled = false;
+    document.getElementById('captureBtn').style.display = '';
+    document.getElementById('stopCamBtn').style.display = '';
+    document.getElementById('retakeBtn').style.display = 'none';
+  } catch (err) {
+    showError('Camera access denied or unavailable: ' + err.message);
+  }
+}
+
+function capturePhoto() {
+  const vid    = document.getElementById('videoFeed');
+  const canvas = document.getElementById('capturedCanvas');
+  canvas.width  = vid.videoWidth;
+  canvas.height = vid.videoHeight;
+  canvas.getContext('2d').drawImage(vid, 0, 0);
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+  camDataUrls[activeCamSlot] = dataUrl;
+
+  // Show in thumbnail row
+  document.getElementById('camPreviewImg'  + cap(activeCamSlot)).src = dataUrl;
+  document.getElementById('camPreviewWrap' + cap(activeCamSlot)).style.display = 'block';
+  document.getElementById('camStatus'      + cap(activeCamSlot)).textContent = '✅ Captured';
+
+  // Flash retake for 1.5s then allow next shot
+  document.getElementById('captureBtn').style.display = 'none';
+  document.getElementById('retakeBtn').style.display = '';
+  setTimeout(() => {
+    document.getElementById('captureBtn').style.display = '';
+    document.getElementById('retakeBtn').style.display = 'none';
+  }, 1500);
+
+  updateAnalyzeBtn();
+}
+
+function retakePhoto() {
+  camDataUrls[activeCamSlot] = null;
+  document.getElementById('camPreviewWrap' + cap(activeCamSlot)).style.display = 'none';
+  document.getElementById('camStatus'      + cap(activeCamSlot)).textContent = 'Not captured';
+  document.getElementById('captureBtn').style.display = '';
+  document.getElementById('retakeBtn').style.display = 'none';
+  updateAnalyzeBtn();
+}
+
+function clearCamSlot(slot) {
+  camDataUrls[slot] = null;
+  document.getElementById('camPreviewWrap' + cap(slot)).style.display = 'none';
+  document.getElementById('camStatus' + cap(slot)).textContent = slot === 'ruler' ? 'Not captured (optional)' : 'Not captured';
+  updateAnalyzeBtn();
+}
+
+function stopCamera() {
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  document.getElementById('videoFeed').style.display = 'none';
+  document.getElementById('capturedCanvas').style.display = 'none';
+  document.getElementById('cameraPlaceholder').style.display = 'flex';
+  document.getElementById('startCamBtn').style.display = '';
+  document.getElementById('captureBtn').disabled = true;
+  document.getElementById('captureBtn').style.display = '';
+  document.getElementById('stopCamBtn').style.display = 'none';
+  document.getElementById('retakeBtn').style.display = 'none';
+  updateAnalyzeBtn();
+}
+
+/* ─── Barcode scanner handling ─────────────────────────────────────────── */
+async function startBarcodeCamera() {
+  hideError();
+  try {
+    barcodeStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1280 } }
+    });
+    const vid = document.getElementById('barcodeVideo');
+    vid.srcObject = barcodeStream;
+    vid.style.display = 'block';
+    document.getElementById('barcodePlaceholder').style.display = 'none';
+    document.getElementById('barcodeLaserLine').style.display = 'block';
+    document.getElementById('startBarcodeCamBtn').style.display = 'none';
+    document.getElementById('stopBarcodeCamBtn').style.display = '';
+
+    startBarcodeDetectLoop(vid);
+  } catch (err) {
+    showError('Barcode camera access denied: ' + err.message);
+  }
+}
+
+function stopBarcodeCamera() {
+  if (barcodeScanInterval) {
+    clearInterval(barcodeScanInterval);
+    barcodeScanInterval = null;
+  }
+  if (barcodeStream) {
+    barcodeStream.getTracks().forEach(t => t.stop());
+    barcodeStream = null;
+  }
+  const vid = document.getElementById('barcodeVideo');
+  if (vid) { vid.style.display = 'none'; vid.srcObject = null; }
+  const laser = document.getElementById('barcodeLaserLine');
+  if (laser) laser.style.display = 'none';
+  const ph = document.getElementById('barcodePlaceholder');
+  if (ph) ph.style.display = 'flex';
+  const startBtn = document.getElementById('startBarcodeCamBtn');
+  if (startBtn) startBtn.style.display = '';
+  const stopBtn = document.getElementById('stopBarcodeCamBtn');
+  if (stopBtn) stopBtn.style.display = 'none';
+}
+
+function startBarcodeDetectLoop(videoEl) {
+  if (barcodeScanInterval) clearInterval(barcodeScanInterval);
+
+  let nativeDetector = null;
+  if ('BarcodeDetector' in window) {
+    try {
+      nativeDetector = new BarcodeDetector({
+        formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'qr_code']
+      });
+    } catch (e) {
+      nativeDetector = null;
+    }
+  }
+
+  let isScanning = false;
+  barcodeScanInterval = setInterval(async () => {
+    if (isScanning || !barcodeStream) return;
+    isScanning = true;
+
+    try {
+      if (nativeDetector) {
+        const barcodes = await nativeDetector.detect(videoEl);
+        if (barcodes && barcodes.length > 0) {
+          handleScannedCode(barcodes[0].rawValue, barcodes[0].format.toUpperCase());
+          stopBarcodeCamera();
+          isScanning = false;
+          return;
+        }
+      }
+
+      // Frame capture fallback
+      const canvas = document.getElementById('barcodeCanvas');
+      if (videoEl.videoWidth > 0) {
+        canvas.width = Math.min(videoEl.videoWidth, 800);
+        canvas.height = Math.round(videoEl.videoHeight * (canvas.width / videoEl.videoWidth));
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+
+        const resp = await fetch('/api/scan-barcode', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image_b64: dataUrl }),
+        });
+        const res = await resp.json();
+        if (res.success && res.barcodes && res.barcodes.length > 0) {
+          handleScannedBarcodeObj(res.barcodes[0]);
+          stopBarcodeCamera();
+          isScanning = false;
+          return;
+        }
+      }
+    } catch (e) {
+      // transient frame error
+    } finally {
+      isScanning = false;
+    }
+  }, 750);
+}
+
+function onDropBarcode(e) {
+  e.preventDefault();
+  document.getElementById('dropBarcode').classList.remove('drag-over');
+  if (e.dataTransfer.files[0]) uploadBarcodeFile(e.dataTransfer.files[0]);
+}
+
+function onBarcodeFileChange(e) {
+  if (e.target.files[0]) uploadBarcodeFile(e.target.files[0]);
+}
+
+async function uploadBarcodeFile(file) {
+  hideError();
+  const fd = new FormData();
+  fd.append('barcode', file);
+
+  try {
+    const resp = await fetch('/api/scan-barcode', { method: 'POST', body: fd });
+    const res = await resp.json();
+    if (res.success && res.barcodes && res.barcodes.length > 0) {
+      handleScannedBarcodeObj(res.barcodes[0]);
+    } else {
+      showError('No barcode or QR code detected in the uploaded image. Please try a clearer or closer shot.');
+    }
+  } catch (err) {
+    showError('Error scanning barcode: ' + err.message);
+  }
+}
+
+function applyManualBarcode() {
+  hideError();
+  const input = document.getElementById('manualBarcodeInput');
+  const val = input.value.trim();
+  if (!val) {
+    showError('Please enter a barcode number or GTIN.');
+    return;
+  }
+  handleScannedCode(val, val.length === 13 ? 'EAN-13' : 'BARCODE');
+}
+
+function handleScannedCode(code, type) {
+  let country = null;
+  const digits = code.replace(/\D/g, '');
+  if (digits.length >= 3) {
+    const pfx = parseInt(digits.slice(0, 3), 10);
+    if (pfx === 890) country = 'India';
+    else if (pfx >= 0 && pfx <= 139) country = 'United States / Canada';
+    else if (pfx >= 300 && pfx <= 379) country = 'France';
+    else if (pfx >= 400 && pfx <= 440) country = 'Germany';
+    else if (pfx >= 500 && pfx <= 509) country = 'United Kingdom';
+    else if (pfx >= 690 && pfx <= 699) country = 'China';
+    else if (pfx >= 880 && pfx <= 880) country = 'South Korea';
+    else if (pfx >= 930 && pfx <= 939) country = 'Australia';
+  }
+
+  let isValid = true;
+  if (digits.length === 13) {
+    const odd = [0,2,4,6,8,10].reduce((sum, i) => sum + parseInt(digits[i], 10), 0);
+    const even = [1,3,5,7,9,11].reduce((sum, i) => sum + parseInt(digits[i], 10), 0) * 3;
+    const chk = (10 - ((odd + even) % 10)) % 10;
+    isValid = (chk === parseInt(digits[12], 10));
+  }
+
+  handleScannedBarcodeObj({
+    code: code,
+    type: type,
+    country: country,
+    is_valid: isValid,
+  });
+}
+
+function handleScannedBarcodeObj(bc) {
+  activeBarcode = bc;
+  document.getElementById('barcodeDisplayValue').textContent = bc.code;
+  let meta = 'Format: ' + (bc.type || 'BARCODE');
+  if (bc.country) meta += ' • Origin: ' + bc.country + (bc.country === 'India' ? ' 🇮🇳' : '');
+  document.getElementById('barcodeDisplayMeta').textContent = meta;
+
+  const validBadge = document.getElementById('barcodeValidityBadge');
+  if (bc.is_valid) {
+    validBadge.textContent = 'Valid GS1 Checksum ✅';
+    validBadge.style.background = 'rgba(34,197,94,.15)';
+    validBadge.style.color = '#4ade80';
+  } else {
+    validBadge.textContent = 'Checksum Unverified ⚠️';
+    validBadge.style.background = 'rgba(245,158,11,.15)';
+    validBadge.style.color = '#fbbf24';
+  }
+
+  document.getElementById('barcodeResultCard').style.display = 'block';
+}
+
+function resetBarcodeScanner() {
+  document.getElementById('barcodeResultCard').style.display = 'none';
+  document.getElementById('manualBarcodeInput').value = '';
+}
+
+function useBarcodeAndAnalyse() {
+  if (!activeBarcode) return;
+  const txt = activeBarcode.code + ' (' + (activeBarcode.type || 'Barcode') + (activeBarcode.country ? ' - ' + activeBarcode.country : '') + ')';
+  document.getElementById('attachedBarcodeText').textContent = txt;
+  document.getElementById('attachedBarcodeBanner').style.display = 'flex';
+  switchTab('upload');
+}
+
+function removeAttachedBarcode() {
+  activeBarcode = null;
+  document.getElementById('attachedBarcodeBanner').style.display = 'none';
+  resetBarcodeScanner();
+}
+
+/* ─── Analyse button state ──────────────────────────────────────────────── */
+function updateAnalyzeBtn() {
+  let ready = false;
+  if (mode === 'upload') {
+    ready = !!uploadFiles.front || !!uploadFiles.back;
+  } else if (mode === 'camera') {
+    ready = !!camDataUrls.front || !!camDataUrls.back;
+  } else {
+    // barcode mode
+    ready = !!activeBarcode;
+  }
+  document.getElementById('analyzeBtn').disabled = !ready;
+}
+
+/* ─── Run analysis ──────────────────────────────────────────────────────── */
+async function runAnalysis() {
+  hideError();
+  setLoading(true);
+  document.getElementById('results').classList.remove('visible');
+
+  const heightVal = document.getElementById('heightInput').value.trim();
+
+  try {
+    let response;
+
+    const manualCode = document.getElementById('manualBarcodeInput') ? document.getElementById('manualBarcodeInput').value.trim() : '';
+    const codeToSend = (activeBarcode && activeBarcode.code) ? activeBarcode.code : manualCode;
+
+    if (mode === 'upload') {
+      const fd = new FormData();
+      if (uploadFiles.front) fd.append('front', uploadFiles.front);
+      if (uploadFiles.back)  fd.append('back',  uploadFiles.back);
+      if (uploadFiles.ruler) fd.append('ruler', uploadFiles.ruler);
+      if (heightVal) fd.append('package_height_mm', heightVal);
+      if (codeToSend) fd.append('barcode_number', codeToSend);
+      if (geminiApiKey) fd.append('gemini_api_key', geminiApiKey);
+      response = await fetch('/analyze', {
+        method: 'POST',
+        headers: geminiApiKey ? { 'X-Gemini-Api-Key': geminiApiKey } : {},
+        body: fd
+      });
+    } else {
+      const body = {
+        front_b64: camDataUrls.front || camDataUrls.back || null,
+        back_b64:  (camDataUrls.front && camDataUrls.back) ? camDataUrls.back : null,
+        package_height_mm: heightVal || null,
+      };
+      if (camDataUrls.ruler) body.ruler_b64 = camDataUrls.ruler;
+      if (codeToSend) body.barcode_number = codeToSend;
+      if (geminiApiKey) body.gemini_api_key = geminiApiKey;
+      const headers = { 'Content-Type': 'application/json' };
+      if (geminiApiKey) headers['X-Gemini-Api-Key'] = geminiApiKey;
+      response = await fetch('/analyze', {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify(body),
+      });
+    }
+
+    const data = await response.json();
+    if (!response.ok || data.error) {
+      showError(data.error || 'Unknown server error', data.traceback || '');
+      return;
+    }
+    renderResults(data);
+  } catch (err) {
+    showError('Network error: ' + err.message);
+  } finally {
+    setLoading(false);
+  }
+}
+
+/* ─── Render results ────────────────────────────────────────────────────── */
+function renderResults(data) {
+  const s = data.score;
+
+  /* Engine Used Badge */
+  const engBadge = document.getElementById('engineUsedBadge');
+  const engText = document.getElementById('engineUsedText');
+  const engIcon = document.getElementById('engineUsedIcon');
+  if (data.analysis_mode === 'llm_barcode') {
+    engIcon.textContent = '🏷️';
+    engText.textContent = data.engine_description || 'Gemini LLM Barcode & GS1 Verification';
+    engBadge.style.display = 'block';
+  } else if (data.analysis_mode === 'llm_vision') {
+    engIcon.textContent = '👁️';
+    engText.textContent = data.engine_description || 'Gemini Multimodal Vision Analysis';
+    engBadge.style.display = 'block';
+  } else {
+    engIcon.textContent = '⚙️';
+    engText.textContent = data.engine_description || 'Local OCR & Rulebook Engine';
+    engBadge.style.display = 'block';
+  }
+
+  /* Score */
+  const pct = s.final_score;
+  const scoreEl = document.getElementById('scoreVal');
+  scoreEl.textContent = pct + '%';
+  scoreEl.className = 'score-big ' + (pct >= 70 ? 'good' : pct >= 40 ? 'warn' : 'danger');
+
+  document.getElementById('starLabel').textContent = s.star_label;
+  document.getElementById('starsDisplay').textContent =
+    '★'.repeat(s.star_rating) + '☆'.repeat(5 - s.star_rating);
+  document.getElementById('passedCount').textContent = s.passed_rules;
+  document.getElementById('failedCount').textContent = s.failed_rules;
+  document.getElementById('ebmScore').textContent  = s.ebm_score  + '%';
+  document.getElementById('ruleScore').textContent = s.rule_score + '%';
+
+  /* Scan meta */
+  document.getElementById('scanIdBadge').textContent = 'Scan: ' + data.scan_id;
+
+  /* Images used */
+  const iu = data.images_used || {};
+  const iuBar = document.getElementById('imagesUsedBar');
+  ['front','back','ruler'].forEach(k => {
+    const el = document.getElementById('iu-' + k);
+    if (el) el.className = 'img-tag ' + (iu[k] ? 'used' : 'not-used');
+  });
+  const elBc = document.getElementById('iu-barcode');
+  if (elBc) elBc.className = 'img-tag ' + (iu['barcode'] || activeBarcode ? 'used' : 'not-used');
+  iuBar.style.display = 'flex';
+
+  /* Barcode Card */
+  const bc = data.barcode || (activeBarcode ? { value: activeBarcode.code, type: activeBarcode.type, country: activeBarcode.country, is_valid: activeBarcode.is_valid, has_barcode: true } : null);
+  const bcCard = document.getElementById('barcodeReportCard');
+  if (bc && (bc.has_barcode || bc.value)) {
+    document.getElementById('resBarcodeValue').textContent = bc.value || 'Detected on packaging';
+    document.getElementById('resBarcodeTypeBadge').textContent = bc.type || 'GS1 BARCODE';
+    document.getElementById('resBarcodeCountryBadge').textContent = (bc.country ? bc.country + (bc.country === 'India' ? ' 🇮🇳' : '') : 'GS1 Global');
+    document.getElementById('resBarcodeValidBadge').textContent = (bc.is_valid !== false ? 'Valid ✅' : 'Checksum Unverified ⚠️');
+    document.getElementById('resBarcodeNote').textContent = 'Product barcode verified under Legal Metrology Packaging Rules. ' + (bc.country ? 'Country of Origin registered: ' + bc.country + '.' : '');
+    bcCard.style.display = 'block';
+  } else {
+    bcCard.style.display = 'none';
+  }
+
+  /* Download */
+  document.getElementById('downloadBtn').href = '/download/' + data.report_id;
+
+  /* Rule sections */
+  renderRuleSection('failedSection', 'failedList', 'failedBadge', data.rules.failed,  true);
+  renderRuleSection('passedSection', 'passedList', 'passedBadge', data.rules.passed, false);
+
+  const naAll = [...data.rules.not_applicable, ...data.rules.inconclusive];
+  const naSection = document.getElementById('naSection');
+  if (naAll.length) {
+    document.getElementById('naBadge').textContent = naAll.length;
+    const body = document.getElementById('naBody');
+    body.innerHTML = '';
+    naAll.forEach(r => body.appendChild(ruleItem(r)));
+    naSection.style.display = 'block';
+  } else { naSection.style.display = 'none'; }
+
+  /* Recommendations */
+  const recs = data.recommendations;
+  const recSection = document.getElementById('recSection');
+  if (recs.length) {
+    document.getElementById('recBadge').textContent = recs.length;
+    const ul = document.getElementById('recList');
+    ul.innerHTML = '';
+    recs.forEach(r => { const li = document.createElement('li'); li.textContent = r; ul.appendChild(li); });
+    recSection.style.display = 'block';
+  } else { recSection.style.display = 'none'; }
+
+  document.getElementById('results').classList.add('visible');
+  document.getElementById('results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function renderRuleSection(sectionId, listId, badgeId, rules, show) {
+  const sec = document.getElementById(sectionId);
+  if (!rules.length || !show) { sec.style.display = 'none'; return; }
+  document.getElementById(badgeId).textContent = rules.length;
+  const list = document.getElementById(listId);
+  list.innerHTML = '';
+  rules.forEach(r => list.appendChild(ruleItem(r)));
+  sec.style.display = 'block';
+}
+
+function ruleItem(r) {
+  const el = document.createElement('div');
+  el.className = 'rule-item ' + r.status;
+  el.innerHTML = `
+    <div>
+      <div class="rule-pill pill-${r.status}">${r.status.replace('_',' ')}</div>
+    </div>
+    <div class="rule-content">
+      <div class="rule-name">${esc(r.rule_name)}</div>
+      <div class="rule-id">${esc(r.rule_id)}</div>
+      <div class="rule-detail">${esc(r.detail)}</div>
+    </div>
+    <div><span class="sev-pill sev-${r.severity}">${esc(r.severity)}</span></div>
+  `;
+  return el;
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+/* ─── Collapse toggle ───────────────────────────────────────────────────── */
+function toggleSection(bodyId, toggleId) {
+  const body = document.getElementById(bodyId);
+  const tog  = document.getElementById(toggleId);
+  const open = body.classList.toggle('open');
+  tog.classList.toggle('open', open);
+}
+
+/* ─── UI helpers ────────────────────────────────────────────────────────── */
+function setLoading(on) {
+  document.getElementById('loaderWrap').classList.toggle('active', on);
+  document.getElementById('analyzeBtn').disabled = on;
+  if (!on) updateAnalyzeBtn();
+}
+
+function showError(msg, tb) {
+  const el = document.getElementById('errorBanner');
+  el.innerHTML = '<strong>Error:</strong> ' + esc(msg) + (tb ? '<pre>' + esc(tb) + '</pre>' : '');
+  el.classList.add('active');
+}
+function hideError() {
+  document.getElementById('errorBanner').classList.remove('active');
+}
+
+/* ─── Init ──────────────────────────────────────────────────────────────── */
+updateCoverage();
+</script>
+</body>
+</html>
