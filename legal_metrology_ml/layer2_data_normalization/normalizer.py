@@ -184,6 +184,86 @@ class DataNormalizer:
                 
         return data
 
+    def from_product_record(
+        self,
+        record: Any,
+        gtin_info: Optional[Any] = None,
+    ) -> PackageData:
+        """Build a :class:`PackageData` from a bar-code registry lookup
+        (``data_sources.ProductRecord``) plus optional GTIN structural facts
+        (``layer1_feature_extraction.gs1.GTINInfo``).
+
+        This is the Layer-2 entry point for the *barcode-first* pipeline: no
+        image, no OCR — every declaration is sourced from GS1 India / Open Food
+        Facts / other registries, with provenance preserved.
+        """
+        data = PackageData()
+        data.analysis_source = "barcode_registry"
+
+        prov: Dict[str, str] = dict(getattr(record, "field_sources", {}) or {})
+
+        data.commodity_name = getattr(record, "product_name", None)
+        data.manufacturer_name = getattr(record, "manufacturer_name", None)
+        data.manufacturer_address = getattr(record, "manufacturer_address", None)
+        data.packer_name = getattr(record, "packer_name", None)
+        data.packer_address = getattr(record, "packer_address", None)
+        data.importer_name = getattr(record, "importer_name", None)
+        data.importer_address = getattr(record, "importer_address", None)
+        data.country_of_origin = getattr(record, "country_of_origin", None)
+
+        qv = getattr(record, "net_quantity_value", None)
+        qu = getattr(record, "net_quantity_unit", None)
+        if qv is not None:
+            data.net_quantity_value = qv
+        if qu:
+            norm_unit, cat = self._normalize_unit(qu)
+            data.net_quantity_unit = norm_unit
+            data.net_quantity_category = cat
+
+        data.mrp_value = getattr(record, "mrp_value", None)
+        data.mrp_currency = getattr(record, "mrp_currency", None)
+        if getattr(record, "mrp_value", None) is not None:
+            # Registry MRP figures are stored net of any wording; the
+            # "inclusive of all taxes" phrasing (Rule 6/18) cannot be verified
+            # from a database field, so leave tax-inclusion unknown.
+            data.mrp_includes_tax = None
+
+        data.manufacture_date = getattr(record, "manufacture_date", None)
+        data.expiry_date = getattr(record, "expiry_date", None)
+        data.best_before = getattr(record, "best_before", None)
+
+        data.consumer_care_phone = getattr(record, "consumer_care_phone", None)
+        data.consumer_care_email = getattr(record, "consumer_care_email", None)
+        data.consumer_care_address = getattr(record, "consumer_care", None)
+
+        data.fssai_license_number = getattr(record, "fssai_license", None)
+        veg = (getattr(record, "veg_non_veg", None) or "")
+        data.has_veg_nonveg_symbol = veg in ("VEG", "NON_VEG")
+
+        data.is_imported = bool(
+            data.importer_name or data.importer_address
+            or (data.country_of_origin and data.country_of_origin.strip().lower() not in ("india", ""))
+        )
+
+        # ── Bar code / GTIN structural facts ───────────────────────────────
+        data.has_barcode = True
+        data.barcode_value = getattr(record, "gtin", None)
+        if gtin_info is not None:
+            data.barcode_type = getattr(gtin_info, "fmt", None) or data.barcode_type
+            data.barcode_gtin_format = getattr(gtin_info, "fmt", None)
+            data.barcode_checksum_valid = getattr(gtin_info, "checksum_valid", None)
+            data.barcode_valid = getattr(gtin_info, "is_valid", None)
+            data.barcode_country = getattr(gtin_info, "issuing_country", None)
+            data.barcode_is_gs1_india = getattr(gtin_info, "is_gs1_india", None)
+            data.barcode_is_restricted = getattr(gtin_info, "is_restricted", None)
+        data.barcode_registered_owner = getattr(record, "brand", None) or getattr(record, "manufacturer_name", None)
+
+        data.product_data_sources = list(getattr(record, "sources", []) or [])
+        data.data_provenance = prov
+        data.product_identified = bool(getattr(record, "found", False))
+
+        return data
+
     @staticmethod
     def merge(primary: PackageData, secondary: PackageData) -> PackageData:
         """Merge two PackageData objects into one unified record.

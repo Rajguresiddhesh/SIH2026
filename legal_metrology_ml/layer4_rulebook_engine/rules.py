@@ -33,6 +33,37 @@ def _r(
     )
 
 
+def _is_barcode_only(pkg: PackageData) -> bool:
+    """True when the record was assembled purely from a bar-code registry
+    lookup — there is no image, so rules that need to *see* the label
+    (typography, contrast, panel layout, script) cannot be judged."""
+    return getattr(pkg, "analysis_source", "image") == "barcode_registry"
+
+
+def _visual_na(rule_id: str, rule_name: str, legal_reference: str) -> RuleResult:
+    return _r(rule_id, rule_name, "NOT_APPLICABLE", "MAJOR",
+             "Requires visual inspection of the physical label — not determinable from bar-code "
+             "registry data alone.", 0.0, legal_reference=legal_reference)
+
+
+def _absent(pkg: PackageData, rule_id: str, rule_name: str, severity: str,
+            weight: float, what: str, legal_reference: str) -> RuleResult:
+    """'Declaration missing' outcome.
+
+    * From an image/OCR/vision audit this is a hard FAIL — the declaration is
+      genuinely not on the label.
+    * From a bar-code-only audit the declaration may still be printed on the
+      pack; the registry simply does not carry it, so the honest verdict is
+      INCONCLUSIVE with a prompt to check the physical label.
+    """
+    if _is_barcode_only(pkg):
+        return _r(rule_id, rule_name, "INCONCLUSIVE", severity,
+                  f"{what} is not carried in the bar-code registry data. It may still be printed on "
+                  f"the pack — verify against the physical label.", weight, legal_reference=legal_reference)
+    return _r(rule_id, rule_name, "FAIL", severity, f"{what} is missing from the label.", weight,
+              legal_reference=legal_reference)
+
+
 # ---------------------------------------------------------------------------
 # Rule 3 — Scope
 # ---------------------------------------------------------------------------
@@ -91,9 +122,8 @@ def check_commodity_name(pkg: PackageData) -> RuleResult:
         return _r("R06_NAME", "Commodity Name (Rule 6)", "PASS", "CRITICAL",
                   f"Commodity name found: '{pkg.commodity_name}'", 1.0,
                   evidence=pkg.commodity_name)
-    return _r("R06_NAME", "Commodity Name (Rule 6)", "FAIL", "CRITICAL",
-              "Commodity name is missing from the label.", 1.0,
-              legal_reference="Rule 6(a)")
+    return _absent(pkg, "R06_NAME", "Commodity Name (Rule 6)", "CRITICAL", 1.0,
+                   "Common/generic name of the commodity", "Rule 6(1)(b)")
 
 
 # ---------------------------------------------------------------------------
@@ -107,9 +137,8 @@ def check_manufacturer_info(pkg: PackageData) -> RuleResult:
         name = pkg.manufacturer_name or pkg.packer_name or pkg.importer_name
         return _r("R10_MFR_NAME", "Manufacturer/Packer Name (Rule 10)", "PASS", "CRITICAL",
                   f"Name found: '{name}'", 1.0, evidence=name)
-    return _r("R10_MFR_NAME", "Manufacturer/Packer Name (Rule 10)", "FAIL", "CRITICAL",
-              "Manufacturer/packer/importer name is missing.", 1.0,
-              legal_reference="Rule 10")
+    return _absent(pkg, "R10_MFR_NAME", "Manufacturer/Packer Name (Rule 10)", "CRITICAL", 1.0,
+                   "Name of the manufacturer / packer / importer", "Rule 6(1)(a) / Rule 10")
 
 
 # ---------------------------------------------------------------------------
@@ -122,9 +151,9 @@ def check_complete_address(pkg: PackageData) -> RuleResult:
     if addr and len(addr.strip()) > 10:
         return _r("R10_ADDRESS", "Complete Address (Rule 10)", "PASS", "CRITICAL",
                   "Address found on label.", 1.0, evidence=addr)
-    return _r("R10_ADDRESS", "Complete Address (Rule 10)", "FAIL", "CRITICAL",
-              "Complete address of manufacturer/packer/importer is missing.", 1.0,
-              legal_reference="Rule 10")
+    return _absent(pkg, "R10_ADDRESS", "Complete Address (Rule 10)", "CRITICAL", 1.0,
+                   "Complete address of the manufacturer / packer / importer (with PIN code)",
+                   "Rule 6(1)(a) / Rule 10")
 
 
 # ---------------------------------------------------------------------------
@@ -137,9 +166,8 @@ def check_net_quantity(pkg: PackageData) -> RuleResult:
         return _r("R11_NET_QTY", "Net Quantity (Rule 11)", "PASS", "CRITICAL",
                   f"Net quantity: {pkg.net_quantity_value} {pkg.net_quantity_unit}",
                   1.0, evidence=f"{pkg.net_quantity_value} {pkg.net_quantity_unit}")
-    return _r("R11_NET_QTY", "Net Quantity (Rule 11)", "FAIL", "CRITICAL",
-              "Net quantity is missing from the label.", 1.0,
-              legal_reference="Rule 11")
+    return _absent(pkg, "R11_NET_QTY", "Net Quantity (Rule 11)", "CRITICAL", 1.0,
+                   "Net quantity declaration", "Rule 6(1)(c) / Rule 11")
 
 
 # ---------------------------------------------------------------------------
@@ -156,8 +184,8 @@ def check_quantity_unit(pkg: PackageData) -> RuleResult:
         return _r("R13_UNITS", "Quantity Unit (Rule 13)", "WARNING", "MAJOR",
                   f"Unit '{pkg.net_quantity_unit}' found but category unresolved.", 0.5,
                   evidence=pkg.net_quantity_unit)
-    return _r("R13_UNITS", "Quantity Unit (Rule 13)", "FAIL", "MAJOR",
-              "Quantity unit is missing.", 0.5, legal_reference="Rule 13")
+    return _absent(pkg, "R13_UNITS", "Quantity Unit (Rule 13)", "MAJOR", 0.5,
+                   "Standard unit of weight/measure/number for the net quantity", "Rule 6(1)(c) / Rule 13")
 
 
 # ---------------------------------------------------------------------------
@@ -184,8 +212,52 @@ def check_mrp_present(pkg: PackageData) -> RuleResult:
         return _r("R06_MRP", "MRP Declaration (Rules 6/18)", "PASS", "CRITICAL",
                   f"MRP found: ₹{pkg.mrp_value:.2f}", 1.0,
                   evidence=f"₹{pkg.mrp_value:.2f}")
-    return _r("R06_MRP", "MRP Declaration (Rules 6/18)", "FAIL", "CRITICAL",
-              "MRP is missing from the label.", 1.0, legal_reference="Rules 6, 18")
+    return _absent(pkg, "R06_MRP", "MRP Declaration (Rules 6/18)", "CRITICAL", 1.0,
+                   "Maximum Retail Price (MRP, inclusive of all taxes)", "Rule 6(1)(e) / Rule 18")
+
+
+# ---------------------------------------------------------------------------
+# Rule 6(1)(e) — MRP wording "inclusive of all taxes"
+# ---------------------------------------------------------------------------
+
+def check_mrp_tax_inclusive(pkg: PackageData) -> RuleResult:
+    """Rule 6(1)(e): MRP must be declared as 'Maximum Retail Price Rs ...
+    inclusive of all taxes' (or 'MRP Rs ... incl. of all taxes')."""
+    if pkg.mrp_value is None:
+        return _r("R06_MRP_TAX", "MRP Tax-Inclusive Wording (Rule 6)", "INCONCLUSIVE", "MAJOR",
+                  "No MRP extracted — cannot check the 'inclusive of all taxes' wording.", 0.5,
+                  legal_reference="Rule 6(1)(e)")
+    if pkg.mrp_includes_tax is True:
+        return _r("R06_MRP_TAX", "MRP Tax-Inclusive Wording (Rule 6)", "PASS", "MAJOR",
+                  "MRP is declared as inclusive of all taxes.", 0.5, legal_reference="Rule 6(1)(e)")
+    if _is_barcode_only(pkg) or pkg.mrp_includes_tax is None:
+        return _r("R06_MRP_TAX", "MRP Tax-Inclusive Wording (Rule 6)", "INCONCLUSIVE", "MAJOR",
+                  "MRP value known but the 'inclusive of all taxes' wording could not be verified "
+                  "from the available data — check the physical label.", 0.5,
+                  legal_reference="Rule 6(1)(e)")
+    return _r("R06_MRP_TAX", "MRP Tax-Inclusive Wording (Rule 6)", "FAIL", "MAJOR",
+              "MRP is printed without the mandatory 'inclusive of all taxes' qualifier.", 0.5,
+              legal_reference="Rule 6(1)(e)")
+
+
+# ---------------------------------------------------------------------------
+# Rule 6 — Country of Origin (imported packages) / Rule 6(1)
+# ---------------------------------------------------------------------------
+
+def check_country_of_origin(pkg: PackageData) -> RuleResult:
+    """Rule 6: Country of origin must be declared for imported packages (and,
+    post-2020, for goods offered for sale online / with imported content)."""
+    if pkg.country_of_origin:
+        return _r("R06_COO", "Country of Origin (Rule 6)", "PASS", "MAJOR",
+                  f"Country of origin declared: {pkg.country_of_origin}.", 0.5,
+                  evidence=pkg.country_of_origin, legal_reference="Rule 6 (imported packages)")
+    if pkg.is_imported:
+        return _r("R06_COO", "Country of Origin (Rule 6)", "FAIL", "MAJOR",
+                  "Package appears to be imported but the country of origin is not declared.", 0.5,
+                  legal_reference="Rule 6 (imported packages)")
+    return _r("R06_COO", "Country of Origin (Rule 6)", "NOT_APPLICABLE", "MINOR",
+              "No indication the package is imported — country of origin not mandatory.", 0.0,
+              legal_reference="Rule 6 (imported packages)")
 
 
 # ---------------------------------------------------------------------------
@@ -194,6 +266,8 @@ def check_mrp_present(pkg: PackageData) -> RuleResult:
 
 def check_mrp_not_altered(pkg: PackageData) -> RuleResult:
     """Rule 18: MRP not altered/obscured improperly?"""
+    if _is_barcode_only(pkg):
+        return _visual_na("R18_MRP_ALTER", "MRP Not Altered (Rule 18)", "Rule 18")
     if pkg.mrp_altered is True:
         return _r("R18_MRP_ALTER", "MRP Not Altered (Rule 18)", "FAIL", "CRITICAL",
                   "MRP appears to have been altered or obscured.", 1.0,
@@ -212,9 +286,8 @@ def check_packing_date(pkg: PackageData) -> RuleResult:
     if date:
         return _r("R06_DATE", "Packing Date (Rule 6)", "PASS", "MAJOR",
                   f"Date found: {date}", 0.5, evidence=date)
-    return _r("R06_DATE", "Packing Date (Rule 6)", "FAIL", "MAJOR",
-              "Month and year of manufacture/packing is missing.", 0.5,
-              legal_reference="Rule 6")
+    return _absent(pkg, "R06_DATE", "Packing Date (Rule 6)", "MAJOR", 0.5,
+                   "Month and year of manufacture / pre-packing / import", "Rule 6(1)(d)")
 
 
 # ---------------------------------------------------------------------------
@@ -228,8 +301,8 @@ def check_consumer_care(pkg: PackageData) -> RuleResult:
         contact = pkg.consumer_care_phone or pkg.consumer_care_email
         return _r("R06_CONSUMER", "Consumer Care Contact (Rule 6)", "PASS", "MAJOR",
                   "Consumer care contact found.", 0.5, evidence=contact)
-    return _r("R06_CONSUMER", "Consumer Care Contact (Rule 6)", "FAIL", "MAJOR",
-              "Consumer care phone/email is missing.", 0.5, legal_reference="Rule 6")
+    return _absent(pkg, "R06_CONSUMER", "Consumer Care Contact (Rule 6)", "MAJOR", 0.5,
+                   "Consumer care details (name/designation, address, phone, e-mail)", "Rule 6(1)(f)")
 
 
 # ---------------------------------------------------------------------------
@@ -238,6 +311,8 @@ def check_consumer_care(pkg: PackageData) -> RuleResult:
 
 def check_legibility(pkg: PackageData) -> RuleResult:
     """Rule 9: Declarations legible and prominent? (proxy: avg OCR confidence)"""
+    if _is_barcode_only(pkg):
+        return _visual_na("R09_LEGIBLE", "Legibility (Rule 9)", "Rule 9")
     conf = pkg.average_ocr_confidence
     if conf == 0.0:
         return _r("R09_LEGIBLE", "Legibility (Rule 9)", "INCONCLUSIVE", "MAJOR",
@@ -256,6 +331,8 @@ def check_legibility(pkg: PackageData) -> RuleResult:
 
 def check_contrast(pkg: PackageData) -> RuleResult:
     """Rule 9: MRP & net-qty numerals have conspicuous contrast with background?"""
+    if _is_barcode_only(pkg):
+        return _visual_na("R09_CONTRAST", "Contrast (Rule 9)", "Rule 9")
     ratio = pkg.mrp_contrast_ratio or pkg.net_qty_contrast_ratio
     if ratio is None:
         return _r("R09_CONTRAST", "Contrast (Rule 9)", "INCONCLUSIVE", "MAJOR",
@@ -274,6 +351,8 @@ def check_contrast(pkg: PackageData) -> RuleResult:
 
 def check_principal_panel(pkg: PackageData) -> RuleResult:
     """Rule 8: Required declarations appear on the principal display panel?"""
+    if _is_barcode_only(pkg):
+        return _visual_na("R08_PDP", "Principal Display Panel (Rule 8)", "Rule 8")
     if pkg.declarations_on_principal_panel:
         return _r("R08_PDP", "Principal Display Panel (Rule 8)", "PASS", "MAJOR",
                   "Declarations are on the principal display panel.", 0.5)
@@ -288,6 +367,8 @@ def check_principal_panel(pkg: PackageData) -> RuleResult:
 
 def check_clear_space(pkg: PackageData) -> RuleResult:
     """Rule 8: Clear space around quantity declaration maintained?"""
+    if _is_barcode_only(pkg):
+        return _visual_na("R08_CLEAR", "Clear Space (Rule 8)", "Rule 8")
     above = pkg.net_qty_clear_space_above_mm
     below = pkg.net_qty_clear_space_below_mm
     left = pkg.net_qty_clear_space_left_mm
@@ -319,6 +400,8 @@ def check_clear_space(pkg: PackageData) -> RuleResult:
 
 def check_font_size(pkg: PackageData) -> RuleResult:
     """Rule 7: Numeral/letter sizes satisfy minimum height requirements?"""
+    if _is_barcode_only(pkg):
+        return _visual_na("R07_FONT", "Font Size (Rule 7)", "Rule 7")
     mrp_h = pkg.mrp_font_height_mm
     qty_h = pkg.net_qty_font_height_mm
 
@@ -380,6 +463,8 @@ def check_wrapper_declarations(pkg: PackageData) -> RuleResult:
 
 def check_language(pkg: PackageData) -> RuleResult:
     """Rule 9: Declarations in Hindi (Devanagari) or English?"""
+    if _is_barcode_only(pkg):
+        return _visual_na("R09_LANG", "Language Requirement (Rule 9)", "Rule 9")
     if pkg.has_hindi_text or pkg.has_english_text:
         lang = []
         if pkg.has_english_text:
@@ -521,6 +606,8 @@ ALL_RULES: list[Callable[[PackageData], RuleResult]] = [
     check_quantity_unit,
     check_quantity_format,
     check_mrp_present,
+    check_mrp_tax_inclusive,
+    check_country_of_origin,
     check_mrp_not_altered,
     check_packing_date,
     check_consumer_care,

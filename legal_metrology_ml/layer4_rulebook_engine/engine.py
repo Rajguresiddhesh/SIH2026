@@ -25,12 +25,18 @@ class RulebookEngine:
         self.rules = rules if rules is not None else ALL_RULES
         logger.info(f"Initialized RulebookEngine with {len(self.rules)} rules.")
 
-    def evaluate(self, package: PackageData) -> ComplianceDiff:
+    def evaluate(
+        self,
+        package: PackageData,
+        extra_results: Optional[list[RuleResult]] = None,
+    ) -> ComplianceDiff:
         """
         Run all rules against the package and return a structured ComplianceDiff.
 
         Args:
             package: The normalized package data to evaluate.
+            extra_results: Already-computed RuleResults to fold into the diff
+                (e.g. bar-code / GS1 checks that take extra arguments).
 
         Returns:
             ComplianceDiff with results categorised into passed/failed/warnings/
@@ -42,20 +48,24 @@ class RulebookEngine:
         not_applicable: list[RuleResult] = []
         inconclusive: list[RuleResult] = []
 
+        results: list[RuleResult] = []
         for rule in self.rules:
             try:
-                result = rule(package)
+                results.append(rule(package))
             except Exception as e:
                 logger.error(f"Error evaluating rule {rule.__name__}: {e}", exc_info=True)
-                result = RuleResult(
+                results.append(RuleResult(
                     rule_id=rule.__name__,
                     rule_name=rule.__name__,
                     status="INCONCLUSIVE",
                     detail=f"Rule evaluation failed with error: {str(e)}",
                     severity="MINOR",
                     weight=0.0,
-                )
+                ))
+        if extra_results:
+            results.extend(extra_results)
 
+        for result in results:
             if result.status == "PASS":
                 passed.append(result)
             elif result.status == "FAIL":

@@ -40,6 +40,7 @@ class PackageData(BaseModel):
     
     # MRP (Rule 18)
     mrp_value: Optional[float] = None
+    mrp_currency: Optional[str] = None
     mrp_includes_tax: Optional[bool] = None
     mrp_altered: Optional[bool] = None
     
@@ -65,6 +66,11 @@ class PackageData(BaseModel):
     barcode_type: Optional[str] = None
     barcode_valid: Optional[bool] = None
     barcode_country: Optional[str] = None
+    barcode_gtin_format: Optional[str] = None       # GTIN-8 / UPC-A / EAN-13 / GTIN-14
+    barcode_checksum_valid: Optional[bool] = None   # GS1 mod-10 check digit
+    barcode_is_gs1_india: Optional[bool] = None     # prefix 890 -> GS1 India licence
+    barcode_is_restricted: Optional[bool] = None    # retailer-internal / coupon / bookland
+    barcode_registered_owner: Optional[str] = None  # brand owner / company from registry
     
     # Font/Presentation Metrics (Rules 7-9)
     mrp_font_height_mm: Optional[float] = None
@@ -95,6 +101,12 @@ class PackageData(BaseModel):
     # OCR Quality
     average_ocr_confidence: float = 0.0
     total_text_blocks: int = 0
+
+    # Provenance — how this record was assembled
+    analysis_source: str = "image"            # image | barcode_registry | llm_vision | llm_barcode
+    product_data_sources: List[str] = Field(default_factory=list)
+    data_provenance: Dict[str, str] = Field(default_factory=dict)  # field -> source
+    product_identified: bool = False          # a registry positively resolved the GTIN
 
 class RuleResult(BaseModel):
     """Result of a single compliance rule check."""
