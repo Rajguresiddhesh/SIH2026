@@ -30,6 +30,7 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+.claude/
 
 # Datasets & test images (large files)
 dataset/

@@ -12,6 +12,35 @@ This pipeline is organized into 5 layers:
 4. **Layer 4: Rulebook Engine**: Performs deterministic, rule-based checks applying legal metrology regulations (e.g., minimum font size tables, mandatory fields).
 5. **Layer 5: Aggregation & Reporting**: Combines ML predictions with rulebook diffs to generate a final `ComplianceScore`, along with actionable recommendations. Outputs JSON or PDF reports.
 
+## Bar-code compliance audit (Rule 6, LM(PC) Rules 2011)
+
+Scanning a bar code now runs a **deterministic** audit — no Gemini key needed:
+
+1. **`gs1.classify_gtin`** structurally verifies the number: GTIN-8/12/13/14
+   length, GS1 mod-10 check digit, issuing GS1 member organisation, GS1 India
+   (prefix `890`), and reserved/restricted ranges (retailer-internal, coupons,
+   ISBN/ISSN book-land).
+2. **`data_sources.lookup_product`** resolves the GTIN to product declarations
+   from, in order of trust:
+   - GS1 India / DataKart (licensed — set `GS1_INDIA_API_KEY`, optionally
+     `GS1_INDIA_API_URL`)
+   - Open Food Facts + Open Beauty / Products / Pet Food Facts (free)
+   - UPCItemDB trial endpoint (free, rate-limited)
+   - Wikidata (`P3962`, free)
+3. The record is normalised to `PackageData` and run through the **full
+   rulebook** (`layer4_rulebook_engine`) plus bar-code-specific checks
+   (`barcode_rules`: `B01`–`B06`).
+4. Declarations the registry cannot supply are reported **INCONCLUSIVE**
+   ("verify on the physical label"), and their weight counts against the score
+   so an unidentified product never reads as "100% compliant".
+
+If a Gemini key *is* present it only *fills gaps* in the registry data; the
+verdict is always the deterministic rulebook's.
+
+CLI: `python -m legal_metrology_ml.main --front label.jpg` still works; the web
+app exposes it at `POST /analyze` (with `barcode_number` / a bar-code image) and
+`POST /api/scan-barcode?lookup=1`.
+
 ## Installation
 
 Ensure you have Python 3.10+ installed.
