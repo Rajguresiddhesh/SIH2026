@@ -37,9 +37,6 @@ Scanning a bar code now runs a **deterministic** audit — no Gemini key needed:
 If a Gemini key *is* present it only *fills gaps* in the registry data; the
 verdict is always the deterministic rulebook's.
 
-If a Gemini key *is* present it only *fills gaps* in the registry data; the
-verdict is always the deterministic rulebook's.
-
 ## Installation
 
 Requires **Python 3.10+**.
