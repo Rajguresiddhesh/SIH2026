@@ -209,7 +209,14 @@ def analyze():
             ]
 
         fc = getattr(report.ebm_prediction, "feature_contributions", {}) or {}
-        if "llm_barcode_analysis" in fc:
+        pd_obj = report.package_data
+        if "barcode_registry_analysis" in fc:
+            analysis_mode = "barcode_registry"
+            srcs = ", ".join(getattr(pd_obj, "product_data_sources", []) or []) or "GS1 structural checks only"
+            engine_desc = f"Bar Code / GS1 Registry Verification + LM(PC) Rules 2011 Rulebook — sources: {srcs}"
+            if "llm_barcode_analysis" in fc:
+                engine_desc += " (Gemini-enriched)"
+        elif "llm_barcode_analysis" in fc:
             analysis_mode = "llm_barcode"
             engine_desc = "Gemini LLM Barcode Verification & GS1 Registry"
         elif "llm_vision_analysis" in fc:
@@ -241,11 +248,30 @@ def analyze():
                 "inconclusive":  serialise_results(rd.inconclusive),
             },
             "barcode": {
-                "has_barcode": report.package_data.has_barcode,
-                "value":       report.package_data.barcode_value,
-                "type":        report.package_data.barcode_type,
-                "is_valid":    report.package_data.barcode_valid,
-                "country":     report.package_data.barcode_country,
+                "has_barcode":     pd_obj.has_barcode,
+                "value":           pd_obj.barcode_value,
+                "type":            pd_obj.barcode_type,
+                "gtin_format":     pd_obj.barcode_gtin_format,
+                "is_valid":        pd_obj.barcode_valid,
+                "checksum_valid":  pd_obj.barcode_checksum_valid,
+                "country":         pd_obj.barcode_country,
+                "is_gs1_india":    pd_obj.barcode_is_gs1_india,
+                "is_restricted":   pd_obj.barcode_is_restricted,
+                "registered_owner": pd_obj.barcode_registered_owner,
+            },
+            "product": {
+                "identified":   getattr(pd_obj, "product_identified", False),
+                "sources":      getattr(pd_obj, "product_data_sources", []) or [],
+                "name":         pd_obj.commodity_name,
+                "manufacturer": pd_obj.manufacturer_name,
+                "address":      pd_obj.manufacturer_address,
+                "net_quantity": (f"{pd_obj.net_quantity_value} {pd_obj.net_quantity_unit}".strip()
+                                 if pd_obj.net_quantity_value is not None else None),
+                "mrp":          pd_obj.mrp_value,
+                "country_of_origin": pd_obj.country_of_origin,
+                "mfg_date":     pd_obj.manufacture_date,
+                "fssai":        pd_obj.fssai_license_number,
+                "provenance":   getattr(pd_obj, "data_provenance", {}) or {},
             },
             "recommendations": report.recommendations,
             "report_id": Path(report_path).stem,
@@ -273,36 +299,81 @@ def analyze():
 
 @app.route("/api/scan-barcode", methods=["POST"])
 def scan_barcode_endpoint():
-    """Decode barcodes or QR codes from an uploaded image or camera snapshot."""
+    """Decode a bar code / QR code (from an image, camera snapshot or a typed
+    number) and structurally verify it as a GS1 GTIN.
+
+    Pass ``lookup: true`` (JSON) or ``?lookup=1`` to additionally resolve the
+    product through the public registries — skip it for the live camera loop so
+    every frame stays fast.
+    """
+    from legal_metrology_ml.layer1_feature_extraction.barcode_scanner import BarcodeScanner
+    from legal_metrology_ml.layer1_feature_extraction.gs1 import classify_gtin
+
     temp_path: Path | None = None
     try:
-        from legal_metrology_ml.layer1_feature_extraction.barcode_scanner import BarcodeScanner
-        scanner = BarcodeScanner()
+        body = {}
+        do_lookup = request.args.get("lookup") in ("1", "true", "yes")
+        manual_code = None
 
         if request.content_type and "multipart" in request.content_type:
+            do_lookup = do_lookup or request.form.get("lookup") in ("1", "true", "yes")
+            manual_code = (request.form.get("barcode_number") or "").strip() or None
             f = request.files.get("image") or request.files.get("file") or request.files.get("barcode")
-            if not f or not f.filename:
-                return jsonify({"error": "No image file provided."}), 400
-            ext = Path(f.filename).suffix or ".jpg"
-            temp_path = UPLOAD_DIR / f"bc_{uuid.uuid4().hex}{ext}"
-            f.save(str(temp_path))
-            barcodes = scanner.scan(temp_path)
+            if f and f.filename:
+                ext = Path(f.filename).suffix or ".jpg"
+                temp_path = UPLOAD_DIR / f"bc_{uuid.uuid4().hex}{ext}"
+                f.save(str(temp_path))
         else:
             body = request.get_json(force=True) or {}
+            do_lookup = do_lookup or bool(body.get("lookup"))
+            manual_code = (body.get("barcode_number") or body.get("code") or "").strip() or None
             data_url = body.get("image_b64") or body.get("barcode_b64") or body.get("image")
-            if not data_url:
-                return jsonify({"error": "image_b64 is required."}), 400
-            if "," in data_url:
-                data_url = data_url.split(",", 1)[1]
-            temp_path = UPLOAD_DIR / f"bc_{uuid.uuid4().hex}.jpg"
-            temp_path.write_bytes(base64.b64decode(data_url))
-            barcodes = scanner.scan(temp_path)
+            if data_url:
+                if "," in data_url:
+                    data_url = data_url.split(",", 1)[1]
+                temp_path = UPLOAD_DIR / f"bc_{uuid.uuid4().hex}.jpg"
+                temp_path.write_bytes(base64.b64decode(data_url))
 
-        results = [b.to_dict() for b in barcodes]
+        barcodes = []
+        if temp_path is not None:
+            barcodes = BarcodeScanner().scan(temp_path)
+        elif manual_code:
+            from legal_metrology_ml.layer1_feature_extraction.barcode_scanner import BarcodeInfo
+            gi = classify_gtin(manual_code)
+            barcodes = [BarcodeInfo(
+                code=gi.digits or manual_code,
+                type=gi.fmt or "BARCODE",
+                is_valid=gi.is_valid,
+                country=gi.issuing_country,
+                source="manual",
+            )]
+        else:
+            return jsonify({"error": "Provide a bar code image or a barcode_number."}), 400
+
+        results = []
+        for b in barcodes:
+            d = b.to_dict()
+            gi = classify_gtin(b.code)
+            d["gtin"] = gi.to_dict()
+            d["is_valid"] = gi.is_valid if gi.is_gtin_length else d.get("is_valid")
+            if gi.issuing_country and not d.get("country"):
+                d["country"] = gi.issuing_country
+            results.append(d)
+
+        product = None
+        if do_lookup and results:
+            try:
+                from legal_metrology_ml.data_sources.product_lookup import lookup_product
+                rec = lookup_product(results[0]["code"])
+                product = rec.to_dict()
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Registry lookup failed in /api/scan-barcode: %s", e)
+
         return jsonify({
             "success": True,
             "count": len(results),
             "barcodes": results,
+            "product": product,
         })
     except Exception as exc:
         logger.exception("Barcode scanning endpoint error")
