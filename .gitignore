@@ -45,3 +45,17 @@ dataset/
 *.zip
 __MACOSX/
 Sheet/
+
+# ── ML research (ml/) ──────────────────────────────────────────────
+# Datasets, checkpoints, run artefacts, format-converted copies.
+/data/
+/runs/
+/out/
+.venv-ml/
+*.pt
+*.pkl
+*.safetensors
+*.tflite
+!legal_metrology_ml/data/ebm_model/compliance_ebm.pkl
+mobile/
+ML-SIH-build/

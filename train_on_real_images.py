@@ -1,6 +1,10 @@
 """
 train_on_real_images.py
 =======================
+[LEGACY] Trains the Layer-3 EBM on rulebook-self-labelled images. Superseded by
+the trained visual pipeline in ``ml/`` (see PAPER.md) — the EBM only runs in the
+``engine="local"`` fallback now. Kept for the paper's baseline comparison.
+
 Trains the Legal Metrology EBM compliance model on **real** product label images
 found in the ``dataset/`` folder.
 

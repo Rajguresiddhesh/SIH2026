@@ -285,8 +285,17 @@ def run_pipeline(
     output_path: Optional[str] = None,
     ocr_engine: Optional[OCREngine] = None,
     api_key: Optional[str] = None,
+    engine: str = "auto",
 ) -> ComplianceReport:
-    """Execute the compliance pipeline (LLM-first with local OCR fallback).
+    """Execute the compliance pipeline.
+
+    engine:
+      "auto"  — barcode -> deterministic; else LLM vision if a key is set;
+                else the trained visual model if weights exist; else local OCR.
+      "ml"    — force the trained visual-document-understanding + metric-
+                geometry pipeline (ml.inference.run_ml_pipeline).
+      "llm"   — force Gemini vision.
+      "local" — force the regex OCR + rulebook + EBM pipeline.
 
     Args:
         front_image:       Path to the front-panel label image (required).
@@ -336,7 +345,25 @@ def run_pipeline(
             logger.warning("Barcode compliance pipeline failed (%s).", e)
             raise RuntimeError(f"Barcode compliance inspection failed: {e}")
 
-    if resolved_key:
+    # ── Trained visual-document-understanding + metric-geometry pipeline ────
+    if front_image and engine in ("ml", "auto"):
+        try:
+            from ml.inference import ml_available, run_ml_pipeline
+
+            if engine == "ml" or (engine == "auto" and not resolved_key and ml_available()):
+                logger.info("Using trained visual pipeline (ml.inference.run_ml_pipeline).")
+                return run_ml_pipeline(
+                    front_image=front_image,
+                    back_image=back_image,
+                    package_height_mm=package_height_mm,
+                    output_path=output_path,
+                )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Trained visual pipeline failed (%s) — falling back.", e)
+            if engine == "ml":
+                raise
+
+    if resolved_key and engine in ("llm", "auto"):
         llm_engine = LLMComplianceEngine(api_key=resolved_key)
 
         # Vision LLM pipeline for label photos when no barcode or as fallback

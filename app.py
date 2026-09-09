@@ -91,6 +91,10 @@ def analyze():
     try:
         package_height_mm = None
         api_key = request.headers.get("X-Gemini-Api-Key")
+        # engine: auto | ml | llm | local  (query string or form/JSON field)
+        engine = (request.args.get("engine")
+                  or (request.form.get("engine") if request.form else None)
+                  or "auto")
 
         # ------------------------------------------------------------------ #
         # 1. Parse incoming images
@@ -136,6 +140,8 @@ def analyze():
             body = request.get_json(silent=True) or {}
             if not api_key:
                 api_key = body.get("gemini_api_key")
+            if body.get("engine"):
+                engine = body["engine"]
             front_b64 = body.get("front_b64") or body.get("image_b64") or body.get("image")
             back_b64  = body.get("back_b64")
             ruler_b64 = body.get("ruler_b64")
@@ -188,6 +194,7 @@ def analyze():
             output_path=report_path,
             ocr_engine=_ocr_engine,
             api_key=api_key,
+            engine=engine,
         )
 
         # ------------------------------------------------------------------ #
@@ -216,6 +223,11 @@ def analyze():
             engine_desc = f"Bar Code / GS1 Registry Verification + LM(PC) Rules 2011 Rulebook — sources: {srcs}"
             if "llm_barcode_analysis" in fc:
                 engine_desc += " (Gemini-enriched)"
+        elif "visual_document_understanding" in fc:
+            analysis_mode = "visual_ml"
+            be = next((k.replace("backend_", "") for k in fc if k.startswith("backend_")), "model")
+            geo = " + metric geometry" if "metric_geometry" in fc else ""
+            engine_desc = f"Trained visual document model ({be}){geo} + LM(PC) Rules 2011 rulebook"
         elif "llm_barcode_analysis" in fc:
             analysis_mode = "llm_barcode"
             engine_desc = "Gemini LLM Barcode Verification & GS1 Registry"

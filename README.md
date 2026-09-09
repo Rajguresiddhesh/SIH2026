@@ -37,6 +37,33 @@ Scanning a bar code now runs a **deterministic** audit — no Gemini key needed:
 If a Gemini key *is* present it only *fills gaps* in the registry data; the
 verdict is always the deterministic rulebook's.
 
+## Research: trained visual pipeline (`ml/`)
+
+[`ml/`](ml/) + [`PAPER.md`](PAPER.md) replace the two weakest links of the v1
+system (regex field parsing, heuristic symbol detection) with:
+
+- **Grounded declaration extraction** — Florence-2 fine-tuned for joint
+  region-detection + region-OCR of the 17 statutory declaration classes
+  (baselines: YOLOv8+OCR, LayoutLMv3, Donut, zero-shot Gemini).
+- **Metric text geometry** — mm-per-pixel recovery (ruler / known dimension /
+  reference object / GS1-barcode prior) with uncertainty propagation, so
+  Rule 7/8/9 (minimum letter height, clear space) are **measured**, not skipped.
+- **Calibrated abstention** — split-conformal per rule turns "INCONCLUSIVE"
+  into a decision with a distribution-free error guarantee.
+- **PCR-Label** — an LLM-assisted, active-learning-curated benchmark
+  (`ml/DATASET_CARD.md`, `ml/ANNOTATION_GUIDE.md`).
+
+```bash
+pip install -r ml/requirements.txt
+python -m ml.tests.test_ml                        # sanity checks (10 tests)
+export PCR_FLORENCE_DIR=runs/florence2            # after training a checkpoint
+curl -X POST 'http://localhost:5000/analyze?engine=ml' -F front=@label.jpg
+```
+
+`run_pipeline(..., engine="ml"|"auto"|"llm"|"local")` selects the path; `auto`
+uses the trained model only when a checkpoint is present. Full reproduction
+steps: [`ml/README.md`](ml/README.md).
+
 ## Installation
 
 Requires **Python 3.10+**.

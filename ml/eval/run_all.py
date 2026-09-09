@@ -1,0 +1,141 @@
+"""Regenerate every experiment table/figure from a checkpoint + the dataset.
+
+    python -m ml.eval.run_all --root data/pcr_label --calibrate
+    python -m ml.eval.run_all --root data/pcr_label --report out/results
+"""
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+from ml.data.dataset import PcrLabelDataset
+from ml.eval.conformal import ConformalCompliance
+from ml.eval.metrics import compliance_scores, field_scores, load_pred_dir
+
+
+def _predict_split(root: str, split: str, pred_dir: Path) -> None:
+    """Run the current visual extractor over a split, dump predicted
+    ImageAnnotations to pred_dir/<stem>.json."""
+    from ml.inference.visual_extractor import VisualDeclarationExtractor
+
+    ex = VisualDeclarationExtractor()
+    if not ex.available:
+        raise SystemExit("no trained model — set PCR_FLORENCE_DIR / PCR_YOLO_WEIGHTS")
+    pred_dir.mkdir(parents=True, exist_ok=True)
+    ds = PcrLabelDataset(root, split=split)
+    for ann in ds:
+        img = ds.image_path(ann)
+        pred = ex.extract(str(img))
+        if pred is not None:
+            (pred_dir / f"{Path(ann.image).stem}.json").write_text(pred.model_dump_json())
+
+
+def _rule_verdicts(root: str, split: str, pred_dir: Path):
+    """(gold_verdicts, pred_verdicts) per image, via the deterministic + geometry
+    pipeline on the *predicted* declarations vs a gold rulebook pass on the
+    *gold* declarations."""
+    import cv2
+
+    from legal_metrology_ml.layer4_rulebook_engine.engine import RulebookEngine
+    from ml.geometry import MetricGeometryEstimator
+    from ml.inference.ml_pipeline import _apply_geometry_decisions
+    from ml.inference.visual_extractor import annotation_to_package_data
+
+    ds = PcrLabelDataset(root, split=split)
+    pred = load_pred_dir(str(pred_dir))
+    geo_est = MetricGeometryEstimator()
+    eng = RulebookEngine()
+    out = []
+    for gold_ann in ds:
+        stem = Path(gold_ann.image).stem
+        pred_ann = pred.get(stem)
+        if pred_ann is None:
+            continue
+        img = cv2.imread(str(ds.image_path(gold_ann)))
+
+        def verdicts(ann):
+            geo = geo_est.measure(img, ann) if img is not None else None
+            pkg = annotation_to_package_data(ann, geo.to_package_fields() if geo else {})
+            d = eng.evaluate(pkg)
+            if geo:
+                d = _apply_geometry_decisions(d, geo)
+            v = {}
+            for bucket, status in (
+                (d.passed, "PASS"), (d.failed, "FAIL"), (d.warnings, "FAIL"),
+                (d.not_applicable, "N/A"), (d.inconclusive, "ABSTAIN"),
+            ):
+                for r in bucket:
+                    v[r.rule_id] = status
+            return v
+
+        out.append((verdicts(gold_ann), verdicts(pred_ann)))
+    return out
+
+
+def calibrate(root: str, out_path: str, alpha: float) -> None:
+    import cv2
+
+    from legal_metrology_ml.layer4_rulebook_engine.engine import RulebookEngine
+    from ml.geometry import MetricGeometryEstimator
+    from ml.inference.ml_pipeline import _apply_geometry_decisions
+    from ml.inference.visual_extractor import annotation_to_package_data
+
+    ds = PcrLabelDataset(root, split="geom")
+    geo_est = MetricGeometryEstimator()
+    eng = RulebookEngine()
+    cal: list[tuple[str, str, float]] = []
+    for ann in ds:
+        img = cv2.imread(str(ds.image_path(ann)))
+        if img is None:
+            continue
+        geo = geo_est.measure(img, ann)
+        pkg = annotation_to_package_data(ann, geo.to_package_fields())
+        d = eng.evaluate(pkg)
+        d = _apply_geometry_decisions(d, geo)
+        gold = {r.rule_id: r.status for b in (d.passed, d.failed) for r in b}
+        for rid, dd in geo.rule_decisions.items():
+            g = gold.get(rid)
+            if g in ("PASS", "FAIL"):
+                cal.append((rid, g, dd["p_fail"]))
+    cc = ConformalCompliance(alpha=alpha).calibrate(cal)
+    cc.save(out_path)
+    print(f"calibrated {len(cc.rules)} rules from {len(cal)} points -> {out_path}")
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--root", required=True)
+    ap.add_argument("--calibrate", action="store_true")
+    ap.add_argument("--alpha", type=float, default=0.1)
+    ap.add_argument("--report", default=None)
+    ap.add_argument("--split", default="gold")
+    a = ap.parse_args()
+
+    root_run = Path("runs")
+    root_run.mkdir(exist_ok=True)
+
+    if a.calibrate:
+        calibrate(a.root, str(root_run / "conformal.json"), a.alpha)
+        return
+
+    pred_dir = root_run / "pred" / a.split
+    _predict_split(a.root, a.split, pred_dir)
+
+    gold = list(PcrLabelDataset(a.root, split=a.split))
+    pred = load_pred_dir(str(pred_dir))
+    fields = field_scores(gold, pred)
+    compl = compliance_scores(_rule_verdicts(a.root, a.split, pred_dir))
+
+    out = {"split": a.split, "n": len(gold), "field_extraction": fields, "compliance": compl}
+    if a.report:
+        Path(a.report).parent.mkdir(parents=True, exist_ok=True)
+        Path(f"{a.report}.json").write_text(json.dumps(out, indent=2))
+    print(json.dumps({"macro_f1_fields": fields["macro_f1_fuzzy"],
+                      "mean_cer": fields["mean_cer"],
+                      "compliance_macro_f1": compl["macro_f1"],
+                      "compliance_coverage": compl["macro_coverage"]}, indent=2))
+
+
+if __name__ == "__main__":
+    main()
