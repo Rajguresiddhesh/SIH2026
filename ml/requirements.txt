@@ -1,0 +1,39 @@
+# PCR-Label training / evaluation stack. Install into a CUDA env for training.
+# (The base app's requirements.txt is enough for inference-only integration.)
+
+--extra-index-url https://download.pytorch.org/whl/cu124
+torch>=2.3
+torchvision>=0.18
+
+transformers>=4.44          # Florence-2, LayoutLMv3, Donut, TrOCR
+accelerate>=0.33
+datasets>=2.20
+timm>=1.0                   # Florence-2 vision backbone
+sentencepiece>=0.2
+einops>=0.8
+peft>=0.12                  # LoRA fine-tuning option
+
+ultralytics>=8.3            # YOLOv8 / RT-DETR detector baseline
+
+pillow>=10.3
+opencv-python>=4.10
+numpy>=1.26
+scipy>=1.13
+shapely>=2.0
+pycocotools>=2.0.8
+scikit-learn>=1.5
+scikit-image>=0.24
+
+# text-metric evaluation
+jiwer>=3.0                  # CER / WER
+python-Levenshtein>=0.25
+rapidfuzz>=3.9
+
+matplotlib>=3.9
+pandas>=2.2
+tqdm>=4.66
+pydantic>=2.7
+requests>=2.32
+
+# geometry
+kornia>=0.7                 # differentiable homography / rectification
