@@ -10,8 +10,40 @@ import json
 from pathlib import Path
 
 from ml.data.dataset import PcrLabelDataset
+from ml.data.schema import ImageAnnotation
+from ml.data.taxonomy import CLASS_TO_ID
 from ml.eval.conformal import ConformalCompliance
 from ml.eval.metrics import compliance_scores, field_scores, load_pred_dir
+
+
+def _detection_eval(root: str, split: str, pred_dir: Path, out_dir: Path) -> dict | None:
+    """COCO mAP of the predicted boxes vs gold."""
+    try:
+        from ml.eval.metrics import detection_map
+    except Exception:
+        return None
+    out_dir.mkdir(parents=True, exist_ok=True)
+    ds = PcrLabelDataset(root, split=split)
+    gt = ds.to_coco(out_dir / "coco_gt.json")
+    name_to_img = {img["file_name"].split("/")[-1].rsplit(".", 1)[0]: img["id"]
+                   for img in gt["images"]}
+    dets = []
+    for p in pred_dir.glob("*.json"):
+        img_id = name_to_img.get(p.stem)
+        if img_id is None:
+            continue
+        ann = ImageAnnotation.model_validate_json(p.read_text())
+        for r in ann.regions:
+            x0, y0, x1, y1 = r.bbox.to_abs(ann.width, ann.height)
+            dets.append({"image_id": img_id, "category_id": CLASS_TO_ID[r.cls],
+                         "bbox": [x0, y0, x1 - x0, y1 - y0], "score": float(r.confidence or 0.5)})
+    (out_dir / "coco_dt.json").write_text(json.dumps(dets))
+    if not dets:
+        return None
+    try:
+        return detection_map(str(out_dir / "coco_gt.json"), str(out_dir / "coco_dt.json"))
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
 
 
 def _predict_split(root: str, split: str, pred_dir: Path, oracle: bool = False) -> None:
@@ -135,12 +167,16 @@ def main() -> None:
     pred = load_pred_dir(str(pred_dir))
     fields = field_scores(gold, pred)
     compl = compliance_scores(_rule_verdicts(a.root, a.split, pred_dir))
+    det = _detection_eval(a.root, a.split, pred_dir, root_run / "coco")
 
-    out = {"split": a.split, "n": len(gold), "field_extraction": fields, "compliance": compl}
+    out = {"split": a.split, "n": len(gold), "detection": det,
+           "field_extraction": fields, "compliance": compl}
     if a.report:
         Path(a.report).parent.mkdir(parents=True, exist_ok=True)
         Path(f"{a.report}.json").write_text(json.dumps(out, indent=2))
     print(json.dumps({"n": len(gold),
+                      "detection_mAP": (det or {}).get("mAP"),
+                      "detection_mAP50": (det or {}).get("mAP50"),
                       "field_macro_f1_fuzzy": fields["macro_f1_fuzzy"],
                       "field_mean_cer": fields["mean_cer"],
                       "compliance_macro_f1": compl["macro_f1"],

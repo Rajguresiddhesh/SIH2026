@@ -80,17 +80,18 @@ class VisualDeclarationExtractor:
 
 def _load_recognizer():
     try:
-        import pytesseract  # noqa: F401
+        from ml.models.recognizer import Recognizer
 
-        return "tesseract"
-    except Exception:
+        return Recognizer()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("no text recogniser: %s", e)
         return None
 
 
-def _fill_values(ann: ImageAnnotation, image_path: str, ocr: str) -> None:
-    from ml.data.taxonomy import TEXTUAL
-
+def _fill_values(ann: ImageAnnotation, image_path: str, rec) -> None:
     import cv2
+
+    from ml.data.taxonomy import TEXTUAL
 
     img = cv2.imread(image_path)
     if img is None:
@@ -103,10 +104,10 @@ def _fill_values(ann: ImageAnnotation, image_path: str, ocr: str) -> None:
         crop = img[max(0, y0):y1, max(0, x0):x1]
         if crop.size == 0:
             continue
-        if ocr == "tesseract":
-            import pytesseract
-
-            r.value = pytesseract.image_to_string(crop, config="--psm 7").strip() or None
+        try:
+            r.value = rec.read(crop) or None
+        except Exception:  # noqa: BLE001
+            r.value = None
 
 
 # ─────────────────────────────────────────────────────────────────────────────

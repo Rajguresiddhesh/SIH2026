@@ -3,9 +3,11 @@
 | file | model | role | trains on |
 |---|---|---|---|
 | `florence2_finetune.py` / `florence2_infer.py` | **Florence-2-base** | flagship — joint region detection + region OCR of declarations | one GPU, LoRA optional |
-| `yolo_detect.py` | YOLOv8 / RT-DETR | detection-only baseline (pair with PARSeq/Tesseract for values) | one GPU |
+| `yolo_detect.py` | YOLOv8 / RT-DETR | detection-only baseline | one GPU |
+| `recognizer.py` | PARSeq / TrOCR / Tesseract | text recogniser for the detect→OCR baseline (auto-selects) | pretrained |
 | `layoutlmv3_fields.py` | LayoutLMv3-base | token-classification baseline (OCR words + 2-D layout → BIO tags) | one GPU |
 | `donut_finetune.py` | Donut-base | OCR-free image → structured JSON baseline | one GPU |
+| `distill.py` | teacher→student | pseudo-label pool → train YOLOv8-n student → INT8 TFLite for the Flutter app (§5) | one GPU |
 
 All produce (directly or via `ml.inference.visual_extractor`) a validated
 `ml.data.schema.ImageAnnotation`, so the eval harness and the compliance

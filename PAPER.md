@@ -142,5 +142,20 @@ LLM-assisted silver labels inherit Gemini's biases (mitigated by the gold set).
 ## 8. Reproducibility
 
 Everything is scripted under `ml/` with pinned `ml/requirements.txt`, fixed
-seeds, and a `ml/eval/run_all.py` that regenerates every table/figure from a
+seeds, and `ml/eval/run_all.py` that regenerates every table/figure from a
 released checkpoint + the dataset.
+
+- **Synthetic bootstrap** (`ml/data/synth.py`, `ml/scripts/bootstrap.sh`) — a
+  GPU-free, label-free end-to-end run: generates a synthetic PCR-Label split
+  with exact box/value/geometry ground truth (+ injected violations),
+  calibrates the conformal thresholds, and runs the full eval with an oracle
+  predictor. Synthetic images are `split="synth"/"geom"` and are excluded from
+  the reported `gold`/`geom` test metrics; they are used only for
+  pre-training and plumbing checks.
+- **Robustness** (`ml/data/augment.py`) — geometry-aware perturbations
+  (perspective, rotation, motion/defocus blur, glare, low-light, noise, JPEG)
+  with box tracking; `make_robustness_set` writes the E6 evaluation split.
+- **Calibration** (`ml/eval/reliability.py`) — ECE/MCE, reliability diagrams,
+  temperature scaling, selective-risk curves.
+- Panel rectification lives in `ml/geometry/{calibration,rectify}.py`
+  (planar homography + cylindrical unwrap).

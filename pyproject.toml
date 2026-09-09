@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "legal-metrology-compliance"
+version = "0.2.0"
+description = "Legal Metrology (Packaged Commodities) Rules 2011 compliance — rulebook, LLM, and a trained visual-document-understanding + metric-geometry pipeline."
+requires-python = ">=3.10"
+readme = "README.md"
+
+[tool.setuptools]
+packages = ["legal_metrology_ml", "ml"]
+
+[tool.setuptools.package-dir]
+"" = "."
+
+[tool.pytest.ini_options]
+testpaths = ["ml/tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+ignore = ["E741", "E501"]
