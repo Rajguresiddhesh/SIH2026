@@ -8,6 +8,7 @@ from .metrics import (
     iou,
     norm_text,
 )
+from .reliability import ece, reliability_diagram, selective_risk_curve, temperature_scale
 
 __all__ = [
     "cer",
@@ -19,4 +20,8 @@ __all__ = [
     "RuleEval",
     "ConformalCompliance",
     "RuleConformal",
+    "ece",
+    "reliability_diagram",
+    "selective_risk_curve",
+    "temperature_scale",
 ]

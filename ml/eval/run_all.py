@@ -14,19 +14,26 @@ from ml.eval.conformal import ConformalCompliance
 from ml.eval.metrics import compliance_scores, field_scores, load_pred_dir
 
 
-def _predict_split(root: str, split: str, pred_dir: Path) -> None:
+def _predict_split(root: str, split: str, pred_dir: Path, oracle: bool = False) -> None:
     """Run the current visual extractor over a split, dump predicted
-    ImageAnnotations to pred_dir/<stem>.json."""
+    ImageAnnotations to pred_dir/<stem>.json. `oracle` copies the gold
+    annotations as predictions — an upper bound / plumbing check."""
+    pred_dir.mkdir(parents=True, exist_ok=True)
+    ds = PcrLabelDataset(root, split=split)
+
+    if oracle:
+        for ann in ds:
+            (pred_dir / f"{Path(ann.image).stem}.json").write_text(ann.model_dump_json())
+        return
+
     from ml.inference.visual_extractor import VisualDeclarationExtractor
 
     ex = VisualDeclarationExtractor()
     if not ex.available:
-        raise SystemExit("no trained model — set PCR_FLORENCE_DIR / PCR_YOLO_WEIGHTS")
-    pred_dir.mkdir(parents=True, exist_ok=True)
-    ds = PcrLabelDataset(root, split=split)
+        raise SystemExit("no trained model — set PCR_FLORENCE_DIR / PCR_YOLO_WEIGHTS "
+                         "(or pass --oracle for a plumbing check)")
     for ann in ds:
-        img = ds.image_path(ann)
-        pred = ex.extract(str(img))
+        pred = ex.extract(str(ds.image_path(ann)))
         if pred is not None:
             (pred_dir / f"{Path(ann.image).stem}.json").write_text(pred.model_dump_json())
 
@@ -110,6 +117,8 @@ def main() -> None:
     ap.add_argument("--alpha", type=float, default=0.1)
     ap.add_argument("--report", default=None)
     ap.add_argument("--split", default="gold")
+    ap.add_argument("--oracle", action="store_true",
+                    help="use gold annotations as predictions (plumbing check / upper bound)")
     a = ap.parse_args()
 
     root_run = Path("runs")
@@ -120,7 +129,7 @@ def main() -> None:
         return
 
     pred_dir = root_run / "pred" / a.split
-    _predict_split(a.root, a.split, pred_dir)
+    _predict_split(a.root, a.split, pred_dir, oracle=a.oracle)
 
     gold = list(PcrLabelDataset(a.root, split=a.split))
     pred = load_pred_dir(str(pred_dir))
@@ -131,9 +140,13 @@ def main() -> None:
     if a.report:
         Path(a.report).parent.mkdir(parents=True, exist_ok=True)
         Path(f"{a.report}.json").write_text(json.dumps(out, indent=2))
-    print(json.dumps({"macro_f1_fields": fields["macro_f1_fuzzy"],
-                      "mean_cer": fields["mean_cer"],
+    print(json.dumps({"n": len(gold),
+                      "field_macro_f1_fuzzy": fields["macro_f1_fuzzy"],
+                      "field_mean_cer": fields["mean_cer"],
                       "compliance_macro_f1": compl["macro_f1"],
+                      "compliance_macro_f1_active": compl["macro_f1_active"],
+                      "compliance_active_rules": compl["n_active_rules"],
+                      "compliance_selective_accuracy": compl["macro_selective_accuracy"],
                       "compliance_coverage": compl["macro_coverage"]}, indent=2))
 
 

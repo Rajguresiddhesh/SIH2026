@@ -41,15 +41,12 @@ def cer(ref: str, hyp: str) -> float:
     m, n = len(ref), len(hyp)
     dp = list(range(n + 1))
     for i in range(1, m + 1):
-        prev, dp[0] = dp[0], i
+        diag = dp[0]
+        dp[0] = i
         for j in range(1, n + 1):
             cur = dp[j]
-            dp[j] = min(
-                dp[j] + 1,
-                dp[j - 1] + 1,
-                prev + (ref[i - 1] != hyp[j - 1]),
-            )
-            prev = cur
+            dp[j] = min(dp[j] + 1, dp[j - 1] + 1, diag + (ref[i - 1] != hyp[j - 1]))
+            diag = cur
     return dp[n] / m
 
 
@@ -251,9 +248,16 @@ def compliance_scores(pairs: Iterable[tuple[dict[str, str], dict[str, str]]]) ->
             re_.add(gold.get(rid, "N/A"), pred.get(rid, "N/A"))
     macro_f1 = sum(r.f1 for r in rules.values()) / len(rules) if rules else 0.0
     macro_cov = sum(r.coverage for r in rules.values()) / len(rules) if rules else 0.0
+    # rules that actually exercise both outcomes in this eval set
+    active = [r for r in rules.values() if (r.tp + r.fn) > 0 and (r.tn + r.fp) > 0]
+    macro_f1_active = sum(r.f1 for r in active) / len(active) if active else None
+    macro_sel_acc = (sum(r.selective_accuracy for r in rules.values()) / len(rules)) if rules else 0.0
     return {
         "macro_f1": round(macro_f1, 4),
+        "macro_f1_active": round(macro_f1_active, 4) if macro_f1_active is not None else None,
+        "n_active_rules": len(active),
         "macro_coverage": round(macro_cov, 4),
+        "macro_selective_accuracy": round(macro_sel_acc, 4),
         "per_rule": {k: v.as_dict() for k, v in sorted(rules.items())},
     }
 
