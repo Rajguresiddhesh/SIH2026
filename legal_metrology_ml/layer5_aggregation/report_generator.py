@@ -78,11 +78,11 @@ class ReportGenerator:
         score = report.compliance_score
 
         stars_str = "*" * score.star_rating + "-" * (5 - score.star_rating)
-        pdf.cell(0, 10, f"Rating: {stars_str} ({score.star_label})", new_x="LMARGIN", new_y="NEXT")
-        pdf.cell(0, 10, f"Final Score: {score.final_score:.1%}", new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(0, 10, self._safe(f"Rating: {stars_str} ({score.star_label})"), new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(0, 10, self._safe(f"Final Score: {score.final_score:.1%}"), new_x="LMARGIN", new_y="NEXT")
 
         na_count = len(report.rulebook_diff.not_applicable) + len(report.rulebook_diff.inconclusive)
-        pdf.cell(0, 10, f"Stats: {score.passed_rules} Passed, {score.failed_rules} Failed, {na_count} N/A", new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(0, 10, self._safe(f"Stats: {score.passed_rules} Passed, {score.failed_rules} Failed, {na_count} N/A"), new_x="LMARGIN", new_y="NEXT")
 
         pdf.ln(5)
 
@@ -90,8 +90,8 @@ class ReportGenerator:
         pdf.set_font("helvetica", "B", 12)
         pdf.cell(0, 10, "Score Breakdown", new_x="LMARGIN", new_y="NEXT")
         pdf.set_font("helvetica", "", 10)
-        pdf.cell(0, 8, f"EBM Assessment Score: {score.ebm_score:.1%}", new_x="LMARGIN", new_y="NEXT")
-        pdf.cell(0, 8, f"Rulebook Assessment Score: {score.rule_score:.1%}", new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(0, 8, self._safe(f"EBM Assessment Score: {score.ebm_score:.1%}"), new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(0, 8, self._safe(f"Rulebook Assessment Score: {score.rule_score:.1%}"), new_x="LMARGIN", new_y="NEXT")
 
         pdf.ln(5)
 
