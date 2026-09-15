@@ -80,9 +80,9 @@ class TextParser:
         r'(?:M\.?\s*R\.?\s*P\.?[a-z\d]?|MAX(?:IMUM)?\s*RETAIL\s*PRICE)'
         r'[\s\S]{0,80}?'
         r'(?:[:.?\-₹z|]+|\bRs\.?|\bINR)?\s*'
-        r'(\d+(?:[.,]\d{1,2})?)(?!\s*(?:mg|g|gm|kg|ml|ltr|tabs?|tablets?|caps?))'
+        r'(\d+(?:[.,]\d{1,2})?)(?!\s*[/\-]\s*\d)(?!\s*(?:mg|g|gm|kg|ml|ltr|tabs?|tablets?|caps?))'
         r'|'
-        r'(?:₹|Rs\.?|INR)\s*(\d+(?:[.,]\d{1,2})?)(?!\s*(?:mg|g|gm|kg|ml|ltr|tabs?|tablets?|caps?|\d{3,}))'
+        r'(?:₹|Rs\.?|INR)\s*(\d+(?:[.,]\d{1,2})?)(?!\s*[/\-]\s*\d)(?!\s*(?:mg|g|gm|kg|ml|ltr|tabs?|tablets?|caps?|\d{3,}))'
         r')',
         re.IGNORECASE,
     )
@@ -234,7 +234,17 @@ class TextParser:
           - Spatial proximity: "MRPz:" followed within 80 chars by "1099.00"
           - Standalone form: "₹ 599.00" or "Rs. 599" (separate line)
         """
-        match = self.MRP_PATTERN.search(text)
+        match = None
+        # A retail price is normally written with two decimals; when the
+        # keyword window holds several numbers, prefer that shape over a bare
+        # integer (which is usually a date part, pack count or serial).
+        for m in self.MRP_PATTERN.finditer(text):
+            v = (m.group(1) or m.group(2) or '')
+            if re.fullmatch(r'\d+[.,]\d{2}', v):
+                match = m
+                break
+            if match is None:
+                match = m
         if match:
             raw = match.group(0)
             # Group 1 = keyword form, Group 2 = standalone currency form
